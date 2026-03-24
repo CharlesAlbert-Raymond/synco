@@ -2,6 +2,6 @@
 # Overrides ~/.config/syncopate/config.yaml
 
 worktree_dir: ".worktrees"
-on_create: ""
+on_create: "./scripts/on-create.sh"
 on_destroy: ""
 auto_delete_branch: true
