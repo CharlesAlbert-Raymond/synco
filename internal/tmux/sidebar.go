@@ -1,0 +1,165 @@
+package tmux
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+const defaultSidebarWidth = 28
+
+// LaunchState describes the current tmux environment when syncopate is invoked.
+type LaunchState int
+
+const (
+	// OutsideNoSession — not in tmux, no syncopate sessions exist.
+	OutsideNoSession LaunchState = iota
+	// OutsideHasSession — not in tmux, but syncopate sessions exist.
+	OutsideHasSession
+	// InsideNoSidebar — inside a tmux session, but no sidebar pane.
+	InsideNoSidebar
+	// InsideHasSidebar — inside a tmux session, sidebar already running.
+	InsideHasSidebar
+)
+
+// DetectState figures out which of the 4 launch states we're in.
+func DetectState() LaunchState {
+	if !IsInsideTmux() {
+		sessions, _ := ListSyncopateSessions()
+		if len(sessions) > 0 {
+			return OutsideHasSession
+		}
+		return OutsideNoSession
+	}
+
+	if hasSidebarPane() {
+		return InsideHasSidebar
+	}
+	return InsideNoSidebar
+}
+
+// CreateSessionAndAttach creates a new tmux session at repoRoot with sidebar, then attaches.
+func CreateSessionAndAttach(repoRoot string, sidebarWidth int) error {
+	// Use the repo directory name as the session base name
+	sessName := SessionNameFor("main")
+
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessName, "-c", repoRoot)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux new-session: %s: %w", string(out), err)
+	}
+
+	if err := addSidebar(sessName, repoRoot, sidebarWidth); err != nil {
+		return err
+	}
+
+	cmd = exec.Command("tmux", "attach-session", "-t", sessName)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// AttachFirstSession attaches to the first available syncopate session.
+func AttachFirstSession() error {
+	sessions, err := ListSyncopateSessions()
+	if err != nil || len(sessions) == 0 {
+		return fmt.Errorf("no syncopate sessions found")
+	}
+
+	cmd := exec.Command("tmux", "attach-session", "-t", sessions[0].Name)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// AddSidebarToCurrent splits the current tmux session and adds a sidebar pane.
+func AddSidebarToCurrent(repoRoot string, sidebarWidth int) error {
+	binary, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find own binary: %w", err)
+	}
+
+	cmd := exec.Command("tmux", "split-window", "-hb",
+		"-l", fmt.Sprintf("%d", sidebarWidth),
+		binary, "--sidebar", "--root", repoRoot,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux split-window: %s: %w", string(out), err)
+	}
+	return nil
+}
+
+// EnsureSidebar makes sure the given session has a syncopate sidebar pane.
+// If it already has one, this is a no-op.
+func EnsureSidebar(session, repoRoot string) error {
+	if hasSidebarPaneInSession(session) {
+		return nil
+	}
+	return addSidebar(session, repoRoot, defaultSidebarWidth)
+}
+
+// addSidebar splits a sidebar into the left side of the given session.
+func addSidebar(session, repoRoot string, width int) error {
+	binary, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find own binary: %w", err)
+	}
+
+	cmd := exec.Command("tmux", "split-window", "-hb",
+		"-l", fmt.Sprintf("%d", width),
+		"-t", session,
+		binary, "--sidebar", "--root", repoRoot,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux split-window: %s: %w", string(out), err)
+	}
+
+	// Focus the right pane (the work area, not the sidebar)
+	panes, err := listPanes(session)
+	if err == nil && len(panes) >= 2 {
+		_ = exec.Command("tmux", "select-pane", "-t", panes[1]).Run()
+	}
+
+	return nil
+}
+
+// hasSidebarPane checks if the current session has a pane running syncopate --sidebar.
+func hasSidebarPane() bool {
+	cmd := exec.Command("tmux", "list-panes", "-F", "#{pane_current_command} #{pane_start_command}")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "--sidebar") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSidebarPaneInSession checks if a specific session has a syncopate sidebar.
+func hasSidebarPaneInSession(session string) bool {
+	cmd := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_start_command}")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "--sidebar") {
+			return true
+		}
+	}
+	return false
+}
+
+func listPanes(session string) ([]string, error) {
+	cmd := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id}")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("tmux list-panes: %w", err)
+	}
+	return strings.Fields(strings.TrimSpace(string(out))), nil
+}

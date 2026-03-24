@@ -34,6 +34,7 @@ type Model struct {
 	width       int
 	height      int
 	err         error
+	sidebarMode bool
 }
 
 func NewModel(repoRoot string, cfg config.Config) Model {
@@ -42,6 +43,16 @@ func NewModel(repoRoot string, cfg config.Config) Model {
 		list:        newListModel(),
 		repoRoot:    repoRoot,
 		config:      cfg,
+	}
+}
+
+func NewSidebarModel(repoRoot string, cfg config.Config) Model {
+	return Model{
+		currentView: viewList,
+		list:        newListModel(),
+		repoRoot:    repoRoot,
+		config:      cfg,
+		sidebarMode: true,
 	}
 }
 
@@ -135,6 +146,12 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.sidebarMode {
+		var cmd tea.Cmd
+		m.list, cmd = m.list.UpdateSidebar(msg, m.repoRoot)
+		return m, cmd
+	}
+
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg, m.repoRoot)
 	return m, cmd
@@ -191,15 +208,28 @@ func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var content string
 
-	switch m.currentView {
-	case viewList:
-		content = m.list.View()
-	case viewCreate:
-		content = m.list.View() + "\n\n" + m.create.View()
-	case viewConfirmDelete:
-		content = m.list.View() + "\n\n" + m.confirm.View()
-	case viewConfig:
-		content = m.configView.View()
+	if m.sidebarMode {
+		switch m.currentView {
+		case viewList:
+			content = m.list.ViewCompact(m.width)
+		case viewCreate:
+			content = m.list.ViewCompact(m.width) + "\n" + m.create.View()
+		case viewConfirmDelete:
+			content = m.list.ViewCompact(m.width) + "\n" + m.confirm.View()
+		case viewConfig:
+			content = m.configView.View()
+		}
+	} else {
+		switch m.currentView {
+		case viewList:
+			content = m.list.View()
+		case viewCreate:
+			content = m.list.View() + "\n\n" + m.create.View()
+		case viewConfirmDelete:
+			content = m.list.View() + "\n\n" + m.confirm.View()
+		case viewConfig:
+			content = m.configView.View()
+		}
 	}
 
 	return lipgloss.NewStyle().

@@ -104,6 +104,16 @@ func IsInsideTmux() bool {
 	return os.Getenv("TMUX") != ""
 }
 
+// CurrentSessionName returns the name of the tmux session we're currently in.
+func CurrentSessionName() (string, error) {
+	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("tmux display-message: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // SwitchClient switches the current tmux client to the given session.
 // This is used when already inside tmux instead of attach.
 func SwitchClient(name string) error {

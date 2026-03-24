@@ -114,6 +114,150 @@ func (m listModel) Update(msg tea.Msg, repoRoot string) (listModel, tea.Cmd) {
 	return m, nil
 }
 
+// UpdateSidebar handles input in sidebar mode.
+// On enter: ensure the worktree session has a sidebar, then switch-client to it.
+func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case entriesMsg:
+		m.entries = []state.Entry(msg)
+		if m.cursor >= len(m.entries) {
+			m.cursor = max(0, len(m.entries)-1)
+		}
+		return m, nil
+
+	case attachMsg:
+		m.message = fmt.Sprintf("Switched to %s", msg.session)
+		m.msgStyle = successStyle
+		return m, fetchEntries(repoRoot)
+
+	case tea.KeyMsg:
+		switch {
+		case msg.String() == "j" || msg.String() == "down":
+			if m.cursor < len(m.entries)-1 {
+				m.cursor++
+			}
+		case msg.String() == "k" || msg.String() == "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case msg.String() == "enter":
+			if len(m.entries) == 0 {
+				return m, nil
+			}
+			entry := m.entries[m.cursor]
+			sessionName := entry.SessionName
+
+			// Create the worktree's tmux session if it doesn't exist
+			if !entry.HasSession {
+				if err := tmux.NewSession(sessionName, entry.Worktree.Path); err != nil {
+					m.message = fmt.Sprintf("Error creating session: %v", err)
+					m.msgStyle = errorStyle
+					return m, nil
+				}
+			}
+
+			// Ensure the target session has a sidebar pane
+			if err := tmux.EnsureSidebar(sessionName, repoRoot); err != nil {
+				m.message = fmt.Sprintf("Error adding sidebar: %v", err)
+				m.msgStyle = errorStyle
+				return m, nil
+			}
+
+			// Switch the tmux client to the worktree's session
+			if err := tmux.SwitchClient(sessionName); err != nil {
+				m.message = fmt.Sprintf("Error switching: %v", err)
+				m.msgStyle = errorStyle
+				return m, nil
+			}
+
+			m.message = fmt.Sprintf("→ %s", entry.BranchShort)
+			m.msgStyle = successStyle
+			return m, fetchEntries(repoRoot)
+		}
+	}
+	return m, nil
+}
+
+// ViewCompact renders a narrow sidebar-friendly view.
+func (m listModel) ViewCompact(width int) string {
+	if width == 0 {
+		width = 28
+	}
+	innerWidth := width - 2 // padding
+
+	var b strings.Builder
+
+	// Header
+	b.WriteString(titleStyle.Render(" syncopate"))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render(" " + strings.Repeat("─", innerWidth-1)))
+	b.WriteString("\n")
+
+	if len(m.entries) == 0 {
+		b.WriteString(subtitleStyle.Render(" No worktrees."))
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render(" c create • q quit"))
+		return b.String()
+	}
+
+	// Entries — compact: cursor + status + branch name
+	maxBranch := innerWidth - 5 // "▸ ● " = 4 chars + space
+	for i, entry := range m.entries {
+		cursor := " "
+		if i == m.cursor {
+			cursor = "▸"
+		}
+
+		// Session status indicator
+		var indicator string
+		if entry.HasSession {
+			if entry.TmuxSession.Attached {
+				indicator = sessionAttachedStyle.Render("●")
+			} else {
+				indicator = sessionActiveStyle.Render("●")
+			}
+		} else {
+			indicator = sessionInactiveStyle.Render("○")
+		}
+
+		// Branch name
+		branch := entry.BranchShort
+		if entry.Worktree.IsMain {
+			branch += " ★"
+		}
+		branch = truncate(branch, maxBranch)
+
+		bStyle := branchStyle
+		if entry.Worktree.IsMain {
+			bStyle = mainBranchStyle
+		}
+
+		row := fmt.Sprintf(" %s %s %s", cursor, indicator, bStyle.Render(branch))
+
+		if i == m.cursor {
+			b.WriteString(selectedRowStyle.Render(
+				lipgloss.NewStyle().Width(width).Render(row),
+			))
+		} else {
+			b.WriteString(row)
+		}
+		b.WriteString("\n")
+	}
+
+	// Status message
+	if m.message != "" {
+		b.WriteString("\n")
+		b.WriteString(" " + m.msgStyle.Render(truncate(m.message, innerWidth)))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render(" ↵ open • c new • d del"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render(" ? cfg  • q quit"))
+
+	return b.String()
+}
+
 func (m listModel) View() string {
 	if len(m.entries) == 0 {
 		return titleStyle.Render("  syncopate") + "\n" +

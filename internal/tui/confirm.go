@@ -51,15 +51,7 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 				return m, nil
 			}
 
-			// Kill tmux session if it exists
-			if m.entry.HasSession {
-				if err := tmux.KillSession(m.entry.SessionName); err != nil {
-					m.err = fmt.Sprintf("Failed to kill session: %v", err)
-					return m, nil
-				}
-			}
-
-			// Remove worktree
+			// Remove worktree first (before killing session)
 			if err := worktree.Remove(m.repoRoot, m.entry.Worktree.Path); err != nil {
 				m.err = fmt.Sprintf("Failed to remove worktree: %v", err)
 				return m, nil
@@ -70,6 +62,29 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 				if err := worktree.DeleteBranch(m.repoRoot, m.entry.BranchShort); err != nil {
 					m.err = fmt.Sprintf("Worktree removed but branch delete failed: %v", err)
 					return m, nil
+				}
+			}
+
+			// Kill tmux session last — if we're inside it, switch away first
+			if m.entry.HasSession {
+				deletingSelf := false
+				if current, err := tmux.CurrentSessionName(); err == nil && current == m.entry.SessionName {
+					deletingSelf = true
+					mainSession := tmux.SessionNameFor("main")
+					// Ensure the main session exists with a sidebar
+					if err := tmux.NewSession(mainSession, m.repoRoot); err != nil {
+						// Session might already exist, that's fine
+						_ = err
+					}
+					_ = tmux.EnsureSidebar(mainSession, m.repoRoot)
+					_ = tmux.SwitchClient(mainSession)
+				}
+				_ = tmux.KillSession(m.entry.SessionName)
+
+				if deletingSelf {
+					// We switched to main — this sidebar instance is gone.
+					// Return quit so the process exits cleanly if still alive.
+					return m, tea.Quit
 				}
 			}
 
