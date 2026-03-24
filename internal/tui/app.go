@@ -17,6 +17,7 @@ const (
 	viewList view = iota
 	viewCreate
 	viewConfirmDelete
+	viewConfig
 )
 
 type errMsg struct{ error }
@@ -27,6 +28,7 @@ type Model struct {
 	list        listModel
 	create      createModel
 	confirm     confirmModel
+	configView  configViewModel
 	repoRoot    string
 	config      config.Config
 	width       int
@@ -97,6 +99,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCreate(msg)
 	case viewConfirmDelete:
 		return m.updateConfirm(msg)
+	case viewConfig:
+		return m.updateConfig(msg)
 	}
 
 	return m, nil
@@ -124,6 +128,10 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "r":
 			return m, fetchEntries(m.repoRoot)
+		case "?":
+			m.currentView = viewConfig
+			m.configView = newConfigViewModel(m.config, m.repoRoot)
+			return m, nil
 		}
 	}
 
@@ -170,6 +178,16 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		if msg.String() == "?" || msg.String() == "esc" {
+			m.currentView = viewList
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m Model) View() string {
 	var content string
 
@@ -180,6 +198,8 @@ func (m Model) View() string {
 		content = m.list.View() + "\n\n" + m.create.View()
 	case viewConfirmDelete:
 		content = m.list.View() + "\n\n" + m.confirm.View()
+	case viewConfig:
+		content = m.configView.View()
 	}
 
 	return lipgloss.NewStyle().

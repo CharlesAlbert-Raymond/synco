@@ -9,9 +9,18 @@ import (
 
 // Config holds the merged syncopate configuration.
 type Config struct {
-	WorktreeDir string `yaml:"worktree_dir"`
-	OnCreate    string `yaml:"on_create"`
-	OnDestroy   string `yaml:"on_destroy"`
+	WorktreeDir       string `yaml:"worktree_dir"`
+	OnCreate          string `yaml:"on_create"`
+	OnDestroy         string `yaml:"on_destroy"`
+	AutoDeleteBranch  *bool  `yaml:"auto_delete_branch,omitempty"`
+}
+
+// ShouldDeleteBranch returns the resolved value of auto_delete_branch (default: false).
+func (c Config) ShouldDeleteBranch() bool {
+	if c.AutoDeleteBranch != nil {
+		return *c.AutoDeleteBranch
+	}
+	return false
 }
 
 // Load reads the global config then the local config, merging them.
@@ -27,6 +36,11 @@ func Load(repoRoot string) (Config, error) {
 	}
 
 	return merged, nil
+}
+
+// GlobalConfigPath returns the path to the global config file.
+func GlobalConfigPath() string {
+	return globalConfigPath()
 }
 
 func globalConfigPath() string {
@@ -61,6 +75,9 @@ func merge(global, local Config) Config {
 	}
 	if local.OnDestroy != "" {
 		out.OnDestroy = local.OnDestroy
+	}
+	if local.AutoDeleteBranch != nil {
+		out.AutoDeleteBranch = local.AutoDeleteBranch
 	}
 
 	return out

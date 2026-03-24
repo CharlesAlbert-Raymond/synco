@@ -12,3 +12,7 @@ on_create: "./scripts/setup-worktree.sh"
 # Script to run before worktree removal.
 # Receives SYNCOPATE_BRANCH and SYNCOPATE_WORKTREE_PATH as env vars.
 on_destroy: "./scripts/cleanup-worktree.sh"
+
+# Automatically delete the git branch when removing a worktree (default: false).
+# Can be toggled per-deletion in the confirm dialog with 'b'.
+auto_delete_branch: false

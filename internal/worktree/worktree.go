@@ -64,6 +64,16 @@ func Remove(repoRoot, path string) error {
 	return nil
 }
 
+// DeleteBranch deletes a local git branch.
+func DeleteBranch(repoRoot, branch string) error {
+	cmd := exec.Command("git", "branch", "-D", branch)
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch -D: %s: %w", string(out), err)
+	}
+	return nil
+}
+
 // BranchList returns local branch names for the repo.
 func BranchList(repoRoot string) ([]string, error) {
 	cmd := exec.Command("git", "branch", "--format=%(refname:short)")

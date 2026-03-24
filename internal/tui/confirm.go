@@ -14,19 +14,21 @@ import (
 )
 
 type confirmModel struct {
-	entry    state.Entry
-	repoRoot string
-	config   config.Config
-	err      string
+	entry        state.Entry
+	repoRoot     string
+	config       config.Config
+	deleteBranch bool
+	err          string
 }
 
 type deleteDoneMsg struct{}
 
 func newConfirmModel(entry state.Entry, repoRoot string, cfg config.Config) confirmModel {
 	return confirmModel{
-		entry:    entry,
-		repoRoot: repoRoot,
-		config:   cfg,
+		entry:        entry,
+		repoRoot:     repoRoot,
+		config:       cfg,
+		deleteBranch: cfg.ShouldDeleteBranch(),
 	}
 }
 
@@ -34,6 +36,10 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "b":
+			m.deleteBranch = !m.deleteBranch
+			return m, nil
+
 		case "y", "Y":
 			// Run on_destroy hook before tearing down
 			if err := config.RunHook(
@@ -57,6 +63,14 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 			if err := worktree.Remove(m.repoRoot, m.entry.Worktree.Path); err != nil {
 				m.err = fmt.Sprintf("Failed to remove worktree: %v", err)
 				return m, nil
+			}
+
+			// Delete the git branch if toggled on
+			if m.deleteBranch {
+				if err := worktree.DeleteBranch(m.repoRoot, m.entry.BranchShort); err != nil {
+					m.err = fmt.Sprintf("Worktree removed but branch delete failed: %v", err)
+					return m, nil
+				}
 			}
 
 			return m, func() tea.Msg { return deleteDoneMsg{} }
@@ -91,6 +105,20 @@ func (m confirmModel) View() string {
 		b.WriteString("\n")
 	}
 
+	// Delete branch checkbox
+	b.WriteString("\n")
+	check := "○"
+	checkStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	if m.deleteBranch {
+		check = "●"
+		checkStyle = lipgloss.NewStyle().Foreground(colorDanger)
+	}
+	b.WriteString(fmt.Sprintf("%s %s",
+		checkStyle.Render(check),
+		lipgloss.NewStyle().Foreground(colorText).Render("Also delete git branch"),
+	))
+	b.WriteString("\n")
+
 	if m.err != "" {
 		b.WriteString("\n")
 		b.WriteString(errorStyle.Render(m.err))
@@ -98,9 +126,10 @@ func (m confirmModel) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("Are you sure? %s / %s",
+	b.WriteString(fmt.Sprintf("  %s / %s / %s",
 		lipgloss.NewStyle().Foreground(colorDanger).Bold(true).Render("[y]es"),
 		lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("[n]o"),
+		lipgloss.NewStyle().Foreground(colorSecondary).Render("[b] toggle branch delete"),
 	))
 
 	return dialogStyle.Render(b.String())

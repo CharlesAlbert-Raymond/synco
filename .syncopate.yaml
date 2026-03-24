@@ -4,3 +4,4 @@
 worktree_dir: ".worktrees"
 on_create: ""
 on_destroy: ""
+auto_delete_branch: true

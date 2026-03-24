@@ -192,7 +192,7 @@ func (m listModel) View() string {
 }
 
 func (m listModel) renderHelp() string {
-	help := "  enter attach • c create • d delete • r refresh • q quit"
+	help := "  enter attach • c create • d delete • r refresh • ? config • q quit"
 	return helpStyle.Render(help)
 }
 
