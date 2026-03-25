@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/charles-albert-raymond/syncopate/internal/config"
+	"github.com/charles-albert-raymond/syncopate/internal/orchestrate"
 	"github.com/charles-albert-raymond/syncopate/internal/state"
 	"github.com/charles-albert-raymond/syncopate/internal/tmux"
-	"github.com/charles-albert-raymond/syncopate/internal/worktree"
+
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -151,19 +152,9 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 	base := stringArg(req, "base")
 
 	cfg, _ := config.Load(tc.repoRoot)
-	wtPath := cfg.WorktreePath(tc.repoRoot, branch)
-
-	if err := worktree.Add(tc.repoRoot, wtPath, branch, true, base); err != nil {
-		return errResult("failed to create worktree: %v", err)
-	}
-
-	sessName := tmux.SessionNameFor(branch)
-	if err := tmux.NewSession(sessName, wtPath); err != nil {
-		return errResult("worktree created at %s but tmux session failed: %v", wtPath, err)
-	}
-
-	if err := config.RunHookInTmux(sessName, cfg.OnCreate, branch, wtPath); err != nil {
-		return errResult("worktree and session created but on_create hook failed: %v", err)
+	wtPath, sessName, err := orchestrate.CreateWorktree(tc.repoRoot, cfg, branch, base)
+	if err != nil {
+		return errResult("%v", err)
 	}
 
 	return textResult(map[string]string{
@@ -195,30 +186,14 @@ func (tc *toolContext) handleDeleteWorktree(_ context.Context, req mcp.CallToolR
 
 	cfg, _ := config.Load(tc.repoRoot)
 
-	// Run on_destroy hook
-	if err := config.RunHook(cfg.OnDestroy, branch, entry.Worktree.Path); err != nil {
-		return errResult("on_destroy hook failed: %v", err)
-	}
-
-	// Remove worktree
-	if err := worktree.Remove(tc.repoRoot, entry.Worktree.Path); err != nil {
-		return errResult("failed to remove worktree: %v", err)
-	}
-
-	// Optionally delete branch
 	deleteBranch := cfg.ShouldDeleteBranch()
 	if v, ok := boolArg(req, "delete_branch"); ok {
 		deleteBranch = v
 	}
-	if deleteBranch {
-		if err := worktree.DeleteBranch(tc.repoRoot, branch); err != nil {
-			return errResult("worktree removed but branch delete failed: %v", err)
-		}
-	}
 
-	// Kill tmux session
-	if entry.HasSession {
-		_ = tmux.KillSession(entry.SessionName)
+	opts := orchestrate.DeleteWorktreeOpts{DeleteBranch: deleteBranch}
+	if err := orchestrate.DeleteWorktree(tc.repoRoot, cfg, entry, opts); err != nil {
+		return errResult("%v", err)
 	}
 
 	return textResult(map[string]any{
@@ -239,6 +214,22 @@ func (tc *toolContext) handleSwitchSession(_ context.Context, req mcp.CallToolRe
 	}
 
 	sessName := tmux.SessionNameFor(branch)
+
+	// Auto-create session if worktree exists but session doesn't (matches TUI behavior)
+	if !tmux.SessionExists(sessName) {
+		result, err := state.Gather(tc.repoRoot)
+		if err != nil {
+			return errResult("failed to gather state: %v", err)
+		}
+		entry, found := findEntry(result.Entries, branch)
+		if !found {
+			return errResult("no worktree found for branch %q", branch)
+		}
+		if err := tmux.NewSession(sessName, entry.Worktree.Path); err != nil {
+			return errResult("failed to create session: %v", err)
+		}
+	}
+
 	if err := tmux.SwitchClient(sessName); err != nil {
 		return errResult("failed to switch session: %v", err)
 	}
@@ -260,6 +251,10 @@ func (tc *toolContext) handleSendKeys(_ context.Context, req mcp.CallToolRequest
 	}
 
 	sessName := tmux.SessionNameFor(branch)
+	if !tmux.SessionExists(sessName) {
+		return errResult("no tmux session for branch %q; create the worktree first or start a session", branch)
+	}
+
 	if err := tmux.SendKeys(sessName, keys); err != nil {
 		return errResult("failed to send keys: %v", err)
 	}
@@ -300,6 +295,10 @@ func (tc *toolContext) handleSessionOutput(_ context.Context, req mcp.CallToolRe
 	}
 
 	sessName := tmux.SessionNameFor(branch)
+	if !tmux.SessionExists(sessName) {
+		return errResult("no tmux session for branch %q; create the worktree first or start a session", branch)
+	}
+
 	output, err := tmux.CapturePaneOutput(sessName, lines)
 	if err != nil {
 		return errResult("failed to capture output: %v", err)

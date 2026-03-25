@@ -8,9 +8,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charles-albert-raymond/syncopate/internal/config"
+	"github.com/charles-albert-raymond/syncopate/internal/orchestrate"
 	"github.com/charles-albert-raymond/syncopate/internal/state"
 	"github.com/charles-albert-raymond/syncopate/internal/tmux"
-	"github.com/charles-albert-raymond/syncopate/internal/worktree"
 )
 
 type confirmModel struct {
@@ -41,55 +41,26 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 			return m, nil
 
 		case "y", "Y":
-			// Run on_destroy hook before tearing down
-			if err := config.RunHook(
-				m.config.OnDestroy,
-				m.entry.BranchShort,
-				m.entry.Worktree.Path,
-			); err != nil {
-				m.err = fmt.Sprintf("on_destroy hook failed: %v", err)
-				return m, nil
-			}
-
-			// Remove worktree first (before killing session)
-			if err := worktree.Remove(m.repoRoot, m.entry.Worktree.Path); err != nil {
-				m.err = fmt.Sprintf("Failed to remove worktree: %v", err)
-				return m, nil
-			}
-
-			// Delete the git branch if toggled on
-			if m.deleteBranch {
-				if err := worktree.DeleteBranch(m.repoRoot, m.entry.BranchShort); err != nil {
-					m.err = fmt.Sprintf("Worktree removed but branch delete failed: %v", err)
-					return m, nil
-				}
-			}
-
-			// Kill tmux session last — if we're inside it, switch away first
+			// If we're deleting the session we're inside, switch away first
+			deletingSelf := false
 			if m.entry.HasSession {
-				deletingSelf := false
 				if current, err := tmux.CurrentSessionName(); err == nil && current == m.entry.SessionName {
 					deletingSelf = true
 					mainSession := tmux.SessionNameFor("main")
-					// Ensure the main session exists with a sidebar
-					if err := tmux.NewSession(mainSession, m.repoRoot); err != nil {
-						// Session might already exist, that's fine
-						_ = err
-					}
-					if layout := m.config.DefaultLayout(); layout != nil {
-						_ = tmux.ApplyLayout(mainSession, layout)
-					}
-					_ = tmux.ApplyTheme(mainSession, m.config.Theme)
+					_ = tmux.NewSession(mainSession, m.repoRoot) // may already exist
 					_ = tmux.EnsureSidebar(mainSession, m.repoRoot)
 					_ = tmux.SwitchClient(mainSession)
 				}
-				_ = tmux.KillSession(m.entry.SessionName)
+			}
 
-				if deletingSelf {
-					// We switched to main — this sidebar instance is gone.
-					// Return quit so the process exits cleanly if still alive.
-					return m, tea.Quit
-				}
+			opts := orchestrate.DeleteWorktreeOpts{DeleteBranch: m.deleteBranch}
+			if err := orchestrate.DeleteWorktree(m.repoRoot, m.config, m.entry, opts); err != nil {
+				m.err = fmt.Sprintf("%v", err)
+				return m, nil
+			}
+
+			if deletingSelf {
+				return m, tea.Quit
 			}
 
 			return m, func() tea.Msg { return deleteDoneMsg{} }

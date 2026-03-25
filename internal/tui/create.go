@@ -9,8 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charles-albert-raymond/syncopate/internal/config"
-	"github.com/charles-albert-raymond/syncopate/internal/tmux"
-	"github.com/charles-albert-raymond/syncopate/internal/worktree"
+	"github.com/charles-albert-raymond/syncopate/internal/orchestrate"
 )
 
 type createModel struct {
@@ -75,36 +74,9 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 			}
 
 			base := strings.TrimSpace(m.baseInput.Value())
-			wtPath := m.config.WorktreePath(m.repoRoot, branch)
 
-			// Create worktree
-			if err := worktree.Add(m.repoRoot, wtPath, branch, true, base); err != nil {
+			if _, _, err := orchestrate.CreateWorktree(m.repoRoot, m.config, branch, base); err != nil {
 				m.err = fmt.Sprintf("Failed: %v", err)
-				return m, nil
-			}
-
-			// Create tmux session
-			sessName := tmux.SessionNameFor(branch)
-			if err := tmux.NewSession(sessName, wtPath); err != nil {
-				m.err = fmt.Sprintf("Worktree created but tmux failed: %v", err)
-				return m, nil
-			}
-
-			// Apply layout and theme
-			if layout := m.config.DefaultLayout(); layout != nil {
-				if err := tmux.ApplyLayout(sessName, layout); err != nil {
-					m.err = fmt.Sprintf("Layout failed: %v", err)
-					return m, nil
-				}
-			}
-			if err := tmux.ApplyTheme(sessName, m.config.Theme); err != nil {
-				m.err = fmt.Sprintf("Theme failed: %v", err)
-				return m, nil
-			}
-
-			// Run on_create hook in the tmux session
-			if err := config.RunHookInTmux(sessName, m.config.OnCreate, branch, wtPath); err != nil {
-				m.err = fmt.Sprintf("Created but on_create hook failed: %v", err)
 				return m, nil
 			}
 
