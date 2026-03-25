@@ -19,8 +19,7 @@ import (
 func main() {
 	// Handle "mcp" subcommand before flag parsing
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
-		os.Args = append(os.Args[:1], os.Args[2:]...)
-		runMCP()
+		runMCP(os.Args[2:])
 		return
 	}
 
@@ -136,14 +135,14 @@ func launch(repoRoot string, cfg config.Config) {
 	}
 }
 
-func runMCP() {
-	rootFlag := flag.String("root", "", "repo root path")
-	flag.Parse()
+func runMCP(args []string) {
+	mcpFlags := flag.NewFlagSet("mcp", flag.ExitOnError)
+	rootFlag := mcpFlags.String("root", "", "repo root path")
+	mcpFlags.Parse(args)
 
 	repoRoot := resolveRepoRoot(*rootFlag)
-	cfg := loadConfig(repoRoot)
 
-	if err := syncmcp.Serve(repoRoot, cfg); err != nil {
+	if err := syncmcp.Serve(repoRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
 		os.Exit(1)
 	}

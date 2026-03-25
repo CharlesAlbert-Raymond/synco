@@ -124,6 +124,11 @@ func SwitchClient(name string) error {
 	return nil
 }
 
+// SessionExists returns true if a tmux session with the given name exists.
+func SessionExists(name string) bool {
+	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+}
+
 // CapturePaneOutput captures the last N lines of terminal output from a session's pane.
 func CapturePaneOutput(session string, lines int) (string, error) {
 	if lines <= 0 {
