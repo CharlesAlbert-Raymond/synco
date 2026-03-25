@@ -27,13 +27,27 @@ func ApplyTheme(session string, theme *config.Theme) error {
 	}
 
 	for k, v := range opts {
-		cmd := exec.Command("tmux", "set-option", "-t", session, k, v)
+		cmd := exec.Command("tmux", "set-option", "-w", "-t", session, k, v)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("tmux set-option %s: %s: %w", k, string(out), err)
 		}
 	}
 
 	return nil
+}
+
+// ApplyThemeToAllSessions applies theme to all existing syncopate sessions.
+func ApplyThemeToAllSessions(theme *config.Theme) {
+	if theme == nil {
+		return
+	}
+	sessions, err := ListSyncopateSessions()
+	if err != nil {
+		return
+	}
+	for _, s := range sessions {
+		_ = ApplyTheme(s.Name, theme)
+	}
 }
 
 // ApplyLayout splits the session's first window into the configured panes

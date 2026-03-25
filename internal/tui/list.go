@@ -226,7 +226,7 @@ func (m listModel) ViewCompact(width int) string {
 	var parts []string
 
 	// Header
-	parts = append(parts, sidebarHeaderStyle.Render(" syncopate"))
+	parts = append(parts, sidebarHeaderStyle.Render(logoSidebar))
 
 	if len(m.entries) == 0 {
 		card := sidebarBoxStyle.
@@ -365,7 +365,7 @@ func (m listModel) ViewCompact(width int) string {
 
 func (m listModel) View() string {
 	if len(m.entries) == 0 {
-		return titleStyle.Render("  syncopate") + "\n" +
+		return titleStyle.Render(logoClassic) + "\n" +
 			subtitleStyle.Render("  git worktree orchestrator") + "\n\n" +
 			subtitleStyle.Render("  No worktrees found. Press 'c' to create one.") + "\n\n" +
 			m.renderHelp()
@@ -374,7 +374,7 @@ func (m listModel) View() string {
 	var b strings.Builder
 
 	// Header
-	b.WriteString(titleStyle.Render("  syncopate"))
+	b.WriteString(titleStyle.Render(logoClassic))
 	b.WriteString("\n")
 	b.WriteString(subtitleStyle.Render("  git worktree orchestrator"))
 	b.WriteString("\n\n")

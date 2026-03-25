@@ -115,6 +115,8 @@ func launch(repoRoot string, cfg config.Config) {
 
 	case tmux.OutsideHasSession:
 		// Not in tmux, sessions exist — reconnect to the first one
+		// Apply theme to all existing sessions in case config changed
+		tmux.ApplyThemeToAllSessions(cfg.Theme)
 		fmt.Println("Reconnecting to existing syncopate session...")
 		if err := tmux.AttachFirstSession(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -122,7 +124,10 @@ func launch(repoRoot string, cfg config.Config) {
 		}
 
 	case tmux.InsideNoSidebar:
-		// In tmux but no sidebar — add it to the current session
+		// In tmux but no sidebar — apply theme and add sidebar
+		if sess, err := tmux.CurrentSessionName(); err == nil {
+			_ = tmux.ApplyTheme(sess, cfg.Theme)
+		}
 		if err := tmux.AddSidebarToCurrent(repoRoot, 28); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)

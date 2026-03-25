@@ -76,6 +76,10 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 						// Session might already exist, that's fine
 						_ = err
 					}
+					if layout := m.config.DefaultLayout(); layout != nil {
+						_ = tmux.ApplyLayout(mainSession, layout)
+					}
+					_ = tmux.ApplyTheme(mainSession, m.config.Theme)
 					_ = tmux.EnsureSidebar(mainSession, m.repoRoot)
 					_ = tmux.SwitchClient(mainSession)
 				}
