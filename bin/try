@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Build and run syncopate in preview mode (no tmux side effects).
+# Shows the UI standalone so you can see the layout without creating
+# or switching tmux sessions.
+#
+# Usage:
+#   bin/try                # sidebar view (default)
+#   bin/try --classic      # full-screen view
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$PROJECT_DIR" && git rev-parse --show-toplevel)"
+BINARY="/tmp/syncopate-try-$$"
+
+cleanup() { rm -f "$BINARY"; }
+trap cleanup EXIT
+
+echo "Building..."
+(cd "$PROJECT_DIR" && go build -o "$BINARY" .)
+
+MODE="--sidebar"
+if [[ "${1:-}" == "--classic" ]]; then
+    MODE="--classic"
+    shift
+fi
+
+echo "Launching ${MODE#--} view (press q to quit)"
+echo ""
+"$BINARY" $MODE --root "$REPO_ROOT" "$@"

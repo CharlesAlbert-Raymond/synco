@@ -11,6 +11,7 @@ import (
 
 	"github.com/charles-albert-raymond/syncopate/internal/config"
 	syncmcp "github.com/charles-albert-raymond/syncopate/internal/mcp"
+	"github.com/charles-albert-raymond/syncopate/internal/state"
 	"github.com/charles-albert-raymond/syncopate/internal/tmux"
 	"github.com/charles-albert-raymond/syncopate/internal/tui"
 )
@@ -26,12 +27,52 @@ func main() {
 	sidebarFlag := flag.Bool("sidebar", false, "run in compact sidebar mode (used internally)")
 	classicFlag := flag.Bool("classic", false, "run the original full-screen TUI")
 	rootFlag := flag.String("root", "", "repo root path (used internally by sidebar)")
+	popupCreateFlag := flag.Bool("popup-create", false, "run create form as popup (internal)")
+	popupDeleteFlag := flag.Bool("popup-delete", false, "run delete confirm as popup (internal)")
+	branchFlag := flag.String("branch", "", "branch name for popup-delete (internal)")
 	flag.Parse()
 
 	repoRoot := resolveRepoRoot(*rootFlag)
 	cfg := loadConfig(repoRoot)
 
 	switch {
+	case *popupCreateFlag:
+		m := tui.NewPopupCreateModel(repoRoot, cfg)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case *popupDeleteFlag:
+		branch := *branchFlag
+		if branch == "" {
+			fmt.Fprintln(os.Stderr, "Error: --branch is required for --popup-delete")
+			os.Exit(1)
+		}
+		result, err := state.Gather(repoRoot)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		var found *state.Entry
+		for i, e := range result.Entries {
+			if e.BranchShort == branch {
+				found = &result.Entries[i]
+				break
+			}
+		}
+		if found == nil {
+			fmt.Fprintf(os.Stderr, "Error: worktree for branch %q not found\n", branch)
+			os.Exit(1)
+		}
+		m := tui.NewPopupConfirmModel(*found, repoRoot, cfg)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
 	case *sidebarFlag:
 		// Internal: run the compact sidebar TUI
 		m := tui.NewSidebarModel(repoRoot, cfg)
@@ -51,23 +92,25 @@ func main() {
 		}
 
 	default:
-		launch(repoRoot)
+		launch(repoRoot, cfg)
 	}
 }
 
-func launch(repoRoot string) {
+func launch(repoRoot string, cfg config.Config) {
 	state := tmux.DetectState()
 
 	switch state {
 	case tmux.OutsideNoSession:
 		// Not in tmux, nothing exists — create session with sidebar, attach
-		if err := tmux.CreateSessionAndAttach(repoRoot, 28); err != nil {
+		if err := tmux.CreateSessionAndAttach(repoRoot, 28, cfg); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 
 	case tmux.OutsideHasSession:
 		// Not in tmux, sessions exist — reconnect to the first one
+		// Apply theme to all existing sessions in case config changed
+		tmux.ApplyThemeToAllSessions(cfg.Theme)
 		fmt.Println("Reconnecting to existing syncopate session...")
 		if err := tmux.AttachFirstSession(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -75,7 +118,10 @@ func launch(repoRoot string) {
 		}
 
 	case tmux.InsideNoSidebar:
-		// In tmux but no sidebar — add it to the current session
+		// In tmux but no sidebar — apply theme and add sidebar
+		if sess, err := tmux.CurrentSessionName(); err == nil {
+			_ = tmux.ApplyTheme(sess, cfg.Theme)
+		}
 		if err := tmux.AddSidebarToCurrent(repoRoot, 28); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)

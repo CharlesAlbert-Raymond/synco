@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/charles-albert-raymond/syncopate/internal/config"
 )
 
 const defaultSidebarWidth = 28
@@ -40,13 +42,25 @@ func DetectState() LaunchState {
 }
 
 // CreateSessionAndAttach creates a new tmux session at repoRoot with sidebar, then attaches.
-func CreateSessionAndAttach(repoRoot string, sidebarWidth int) error {
+func CreateSessionAndAttach(repoRoot string, sidebarWidth int, cfg config.Config) error {
 	// Use the repo directory name as the session base name
 	sessName := SessionNameFor("main")
 
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessName, "-c", repoRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux new-session: %s: %w", string(out), err)
+	}
+
+	// Apply layout before sidebar so pane indices are predictable
+	if layout := cfg.DefaultLayout(); layout != nil {
+		if err := ApplyLayout(sessName, layout); err != nil {
+			return fmt.Errorf("apply layout: %w", err)
+		}
+	}
+
+	// Apply theme (border colors, labels)
+	if err := ApplyTheme(sessName, cfg.Theme); err != nil {
+		return fmt.Errorf("apply theme: %w", err)
 	}
 
 	if err := addSidebar(sessName, repoRoot, sidebarWidth); err != nil {
@@ -172,4 +186,38 @@ func listPanes(session string) ([]string, error) {
 		return nil, fmt.Errorf("tmux list-panes: %w", err)
 	}
 	return strings.Fields(strings.TrimSpace(string(out))), nil
+}
+
+// LaunchPopup opens a tmux popup overlay centered on the main work pane.
+// Blocks until the popup command exits.
+func LaunchPopup(args []string, width, height int, title string) error {
+	binary, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find own binary: %w", err)
+	}
+
+	cmdArgs := []string{"display-popup", "-EE",
+		"-w", fmt.Sprintf("%d", width),
+		"-h", fmt.Sprintf("%d", height),
+	}
+
+	// Target the main (non-sidebar) pane so the popup centers on it
+	// instead of the narrow sidebar pane.
+	if session, err := CurrentSessionName(); err == nil {
+		if panes, err := listPanes(session); err == nil && len(panes) >= 2 {
+			cmdArgs = append(cmdArgs, "-t", panes[len(panes)-1])
+		}
+	}
+
+	if title != "" {
+		cmdArgs = append(cmdArgs, "-T", fmt.Sprintf(" %s ", title))
+	}
+	cmdArgs = append(cmdArgs, "--", binary)
+	cmdArgs = append(cmdArgs, args...)
+
+	cmd := exec.Command("tmux", cmdArgs...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux display-popup: %s: %w", string(out), err)
+	}
+	return nil
 }

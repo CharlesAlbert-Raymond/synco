@@ -29,9 +29,9 @@ func (t *tmuxExecCmd) SetStderr(w io.Writer) { t.cmd.Stderr = w }
 type listModel struct {
 	entries       []state.Entry
 	otherPorts    []state.SessionPorts // non-syncopate sessions with ports
-	cursor        int
-	cursorInitd   bool // true after cursor has been placed on current worktree
-	width         int
+	cursor             int
+	resetCursorOnNext  bool // reset cursor to current worktree on next entriesMsg
+	width              int
 	height        int
 	message       string
 	msgStyle      lipgloss.Style
@@ -39,7 +39,7 @@ type listModel struct {
 }
 
 func newListModel() listModel {
-	return listModel{}
+	return listModel{resetCursorOnNext: true}
 }
 
 type entriesMsg struct {
@@ -97,6 +97,10 @@ func (m listModel) Update(msg tea.Msg, repoRoot string) (listModel, tea.Cmd) {
 					m.msgStyle = errorStyle
 					return m, nil
 				}
+				if layout := m.config.DefaultLayout(); layout != nil {
+					_ = tmux.ApplyLayout(sessionName, layout)
+				}
+				_ = tmux.ApplyTheme(sessionName, m.config.Theme)
 			}
 
 			if tmux.IsInsideTmux() {
@@ -130,15 +134,9 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 	case entriesMsg:
 		m.entries = msg.entries
 		m.otherPorts = msg.otherPorts
-		if !m.cursorInitd {
-			// On first load, place cursor on the current worktree
-			for i, e := range m.entries {
-				if e.IsCurrent {
-					m.cursor = i
-					break
-				}
-			}
-			m.cursorInitd = true
+		if m.resetCursorOnNext {
+			m.resetCursorToCurrent()
+			m.resetCursorOnNext = false
 		} else if m.cursor >= len(m.entries) {
 			m.cursor = max(0, len(m.entries)-1)
 		}
@@ -173,6 +171,10 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 					m.msgStyle = errorStyle
 					return m, nil
 				}
+				if layout := m.config.DefaultLayout(); layout != nil {
+					_ = tmux.ApplyLayout(sessionName, layout)
+				}
+				_ = tmux.ApplyTheme(sessionName, m.config.Theme)
 			}
 
 			// Ensure the target session has a sidebar pane
@@ -200,6 +202,20 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 	return m, nil
 }
 
+// resetCursorToCurrent moves the cursor to the entry marked IsCurrent.
+// If no entry is current, clamps the cursor within bounds.
+func (m *listModel) resetCursorToCurrent() {
+	for i, e := range m.entries {
+		if e.IsCurrent {
+			m.cursor = i
+			return
+		}
+	}
+	if m.cursor >= len(m.entries) {
+		m.cursor = max(0, len(m.entries)-1)
+	}
+}
+
 // ViewCompact renders a narrow sidebar-friendly view with per-worktree cards.
 func (m listModel) ViewCompact(width int) string {
 	if width == 0 {
@@ -210,7 +226,7 @@ func (m listModel) ViewCompact(width int) string {
 	var parts []string
 
 	// Header
-	parts = append(parts, sidebarHeaderStyle.Render(" syncopate"))
+	parts = append(parts, sidebarHeaderStyle.Render(logoSidebar))
 
 	if len(m.entries) == 0 {
 		card := sidebarBoxStyle.
@@ -341,7 +357,7 @@ func (m listModel) ViewCompact(width int) string {
 	parts = append(parts, helpBoxStyle.Render(
 		lipgloss.NewStyle().Foreground(colorMuted).Render("↵ open · c new · d del")+
 			"\n"+
-			lipgloss.NewStyle().Foreground(colorMuted).Render("? cfg  · q quit"),
+			lipgloss.NewStyle().Foreground(colorMuted).Render("esc back · ? cfg · q quit"),
 	))
 
 	return strings.Join(parts, "\n")
@@ -349,7 +365,7 @@ func (m listModel) ViewCompact(width int) string {
 
 func (m listModel) View() string {
 	if len(m.entries) == 0 {
-		return titleStyle.Render("  syncopate") + "\n" +
+		return titleStyle.Render(logoClassic) + "\n" +
 			subtitleStyle.Render("  git worktree orchestrator") + "\n\n" +
 			subtitleStyle.Render("  No worktrees found. Press 'c' to create one.") + "\n\n" +
 			m.renderHelp()
@@ -358,7 +374,7 @@ func (m listModel) View() string {
 	var b strings.Builder
 
 	// Header
-	b.WriteString(titleStyle.Render("  syncopate"))
+	b.WriteString(titleStyle.Render(logoClassic))
 	b.WriteString("\n")
 	b.WriteString(subtitleStyle.Render("  git worktree orchestrator"))
 	b.WriteString("\n\n")
