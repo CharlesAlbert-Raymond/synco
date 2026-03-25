@@ -112,6 +112,20 @@ func findEntry(entries []state.Entry, branch string) (state.Entry, bool) {
 	return state.Entry{}, false
 }
 
+// resolveSessionName returns the tmux session name for a branch, using state.Gather
+// to correctly handle the root worktree (whose session key is stable, not branch-based).
+func (tc *toolContext) resolveSessionName(branch string) (string, error) {
+	result, err := state.Gather(tc.repoRoot)
+	if err != nil {
+		return "", fmt.Errorf("failed to gather state: %v", err)
+	}
+	entry, found := findEntry(result.Entries, branch)
+	if !found {
+		return "", fmt.Errorf("no worktree found for branch %q", branch)
+	}
+	return entry.SessionName, nil
+}
+
 // --- Handlers ---
 
 type worktreeInfo struct {
@@ -223,19 +237,18 @@ func (tc *toolContext) handleSwitchSession(_ context.Context, req mcp.CallToolRe
 		return errResult("cannot switch session: not inside tmux")
 	}
 
-	project := tmux.ProjectName(tc.repoRoot)
-	sessName := tmux.SessionNameFor(project, branch)
+	result, err := state.Gather(tc.repoRoot)
+	if err != nil {
+		return errResult("failed to gather state: %v", err)
+	}
+	entry, found := findEntry(result.Entries, branch)
+	if !found {
+		return errResult("no worktree found for branch %q", branch)
+	}
+	sessName := entry.SessionName
 
 	// Auto-create session if worktree exists but session doesn't (matches TUI behavior)
-	if !tmux.SessionExists(sessName) {
-		result, err := state.Gather(tc.repoRoot)
-		if err != nil {
-			return errResult("failed to gather state: %v", err)
-		}
-		entry, found := findEntry(result.Entries, branch)
-		if !found {
-			return errResult("no worktree found for branch %q", branch)
-		}
+	if !entry.HasSession {
 		if err := tmux.NewSession(sessName, entry.Worktree.Path); err != nil {
 			return errResult("failed to create session: %v", err)
 		}
@@ -261,8 +274,10 @@ func (tc *toolContext) handleSendKeys(_ context.Context, req mcp.CallToolRequest
 		return errResult("keys is required")
 	}
 
-	project := tmux.ProjectName(tc.repoRoot)
-	sessName := tmux.SessionNameFor(project, branch)
+	sessName, err := tc.resolveSessionName(branch)
+	if err != nil {
+		return errResult("%v", err)
+	}
 	if !tmux.SessionExists(sessName) {
 		return errResult("no tmux session for branch %q; create the worktree first or start a session", branch)
 	}
@@ -306,8 +321,10 @@ func (tc *toolContext) handleSessionOutput(_ context.Context, req mcp.CallToolRe
 		lines = int(v)
 	}
 
-	project := tmux.ProjectName(tc.repoRoot)
-	sessName := tmux.SessionNameFor(project, branch)
+	sessName, err := tc.resolveSessionName(branch)
+	if err != nil {
+		return errResult("%v", err)
+	}
 	if !tmux.SessionExists(sessName) {
 		return errResult("no tmux session for branch %q; create the worktree first or start a session", branch)
 	}

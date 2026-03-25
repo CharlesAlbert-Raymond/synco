@@ -44,7 +44,7 @@ func DetectState(project string) LaunchState {
 // CreateSessionAndAttach creates a new tmux session at repoRoot with sidebar, then attaches.
 func CreateSessionAndAttach(repoRoot string, sidebarWidth string, cfg config.Config) error {
 	project := ProjectName(repoRoot)
-	sessName := SessionNameFor(project, "main")
+	sessName := SessionNameFor(project, RootSessionKey)
 
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessName, "-c", repoRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {

@@ -64,7 +64,13 @@ func Gather(repoRoot string) (*GatherResult, error) {
 			branch = "(detached)"
 		}
 
-		sessName := tmux.SessionNameFor(project, branch)
+		// Use a stable key for the root worktree so its session name
+		// doesn't change when the user switches branches on the root.
+		sessionKey := branch
+		if wt.IsMain {
+			sessionKey = tmux.RootSessionKey
+		}
+		sessName := tmux.SessionNameFor(project, sessionKey)
 		sess := sessionMap[sessName]
 		syncoSessions[sessName] = true
 

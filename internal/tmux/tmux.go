@@ -20,6 +20,11 @@ type Session struct {
 
 var unsafeChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
+// RootSessionKey is the stable identifier used for the root worktree's tmux session.
+// Using a constant instead of the branch name ensures navigation keeps working
+// when the user switches branches on the root worktree.
+const RootSessionKey = "root"
+
 // ProjectName derives a sanitized project identifier from a repo root path.
 func ProjectName(repoRoot string) string {
 	name := filepath.Base(repoRoot)
