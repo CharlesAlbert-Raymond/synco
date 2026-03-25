@@ -101,7 +101,8 @@ func launch(repoRoot string, cfg config.Config) {
 		sidebarWidth = "28"
 	}
 
-	state := tmux.DetectState()
+	project := tmux.ProjectName(repoRoot)
+	state := tmux.DetectState(project)
 
 	switch state {
 	case tmux.OutsideNoSession:
@@ -114,9 +115,9 @@ func launch(repoRoot string, cfg config.Config) {
 	case tmux.OutsideHasSession:
 		// Not in tmux, sessions exist — reconnect to the first one
 		// Apply theme to all existing sessions in case config changed
-		tmux.ApplyThemeToAllSessions(cfg.Theme)
+		tmux.ApplyThemeToAllSessions(project, cfg.Theme)
 		fmt.Println("Reconnecting to existing synco session...")
-		if err := tmux.AttachFirstSession(); err != nil {
+		if err := tmux.AttachFirstSession(project); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

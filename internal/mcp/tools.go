@@ -223,7 +223,8 @@ func (tc *toolContext) handleSwitchSession(_ context.Context, req mcp.CallToolRe
 		return errResult("cannot switch session: not inside tmux")
 	}
 
-	sessName := tmux.SessionNameFor(branch)
+	project := tmux.ProjectName(tc.repoRoot)
+	sessName := tmux.SessionNameFor(project, branch)
 
 	// Auto-create session if worktree exists but session doesn't (matches TUI behavior)
 	if !tmux.SessionExists(sessName) {
@@ -260,7 +261,8 @@ func (tc *toolContext) handleSendKeys(_ context.Context, req mcp.CallToolRequest
 		return errResult("keys is required")
 	}
 
-	sessName := tmux.SessionNameFor(branch)
+	project := tmux.ProjectName(tc.repoRoot)
+	sessName := tmux.SessionNameFor(project, branch)
 	if !tmux.SessionExists(sessName) {
 		return errResult("no tmux session for branch %q; create the worktree first or start a session", branch)
 	}
@@ -304,7 +306,8 @@ func (tc *toolContext) handleSessionOutput(_ context.Context, req mcp.CallToolRe
 		lines = int(v)
 	}
 
-	sessName := tmux.SessionNameFor(branch)
+	project := tmux.ProjectName(tc.repoRoot)
+	sessName := tmux.SessionNameFor(project, branch)
 	if !tmux.SessionExists(sessName) {
 		return errResult("no tmux session for branch %q; create the worktree first or start a session", branch)
 	}

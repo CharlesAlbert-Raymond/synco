@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
 )
-
-const SessionPrefix = "synco-"
 
 // Session represents a tmux session managed by synco.
 type Session struct {
@@ -21,19 +20,33 @@ type Session struct {
 
 var unsafeChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
-// SessionNameFor derives a tmux session name from a branch name.
-func SessionNameFor(branch string) string {
-	safe := unsafeChars.ReplaceAllString(branch, "-")
-	// Collapse runs of hyphens
+// ProjectName derives a sanitized project identifier from a repo root path.
+func ProjectName(repoRoot string) string {
+	name := filepath.Base(repoRoot)
+	safe := unsafeChars.ReplaceAllString(name, "-")
 	for strings.Contains(safe, "--") {
 		safe = strings.ReplaceAll(safe, "--", "-")
 	}
-	safe = strings.Trim(safe, "-")
-	return SessionPrefix + safe
+	return strings.Trim(safe, "-")
 }
 
-// ListSessions returns tmux sessions prefixed with "synco-".
-func ListSessions() ([]Session, error) {
+// sanitize cleans a string for use in tmux session names.
+func sanitize(s string) string {
+	safe := unsafeChars.ReplaceAllString(s, "-")
+	for strings.Contains(safe, "--") {
+		safe = strings.ReplaceAll(safe, "--", "-")
+	}
+	return strings.Trim(safe, "-")
+}
+
+// SessionNameFor derives a tmux session name from a project name and branch.
+func SessionNameFor(project, branch string) string {
+	return project + "-" + sanitize(branch)
+}
+
+// ListSessions returns tmux sessions prefixed with the project name.
+func ListSessions(project string) ([]Session, error) {
+	prefix := project + "-"
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}\t#{session_attached}")
 	out, err := cmd.Output()
 	if err != nil {
@@ -52,7 +65,7 @@ func ListSessions() ([]Session, error) {
 			continue
 		}
 		name := parts[0]
-		if !strings.HasPrefix(name, SessionPrefix) {
+		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
 		sessions = append(sessions, Session{

@@ -149,16 +149,7 @@ func cleanupTestSession(t *testing.T, sessionName string) {
 }
 
 func sessionExists(sessionName string) bool {
-	sessions, err := tmux.ListSessions()
-	if err != nil {
-		return false
-	}
-	for _, s := range sessions {
-		if s.Name == sessionName {
-			return true
-		}
-	}
-	return false
+	return tmux.SessionExists(sessionName)
 }
 
 // TestIntegration_RestoreCreatesSessionForOrphanedWorktree verifies that
@@ -168,7 +159,7 @@ func TestIntegration_RestoreCreatesSessionForOrphanedWorktree(t *testing.T) {
 	repoRoot := gitRepoRoot(t)
 
 	branch, wtPath := createTestWorktree(t, repoRoot, "orphan1")
-	sessName := tmux.SessionNameFor(branch)
+	sessName := tmux.SessionNameFor(tmux.ProjectName(repoRoot), branch)
 	defer cleanupTestWorktree(t, repoRoot, branch, wtPath)
 	defer cleanupTestSession(t, sessName)
 
@@ -210,7 +201,7 @@ func TestIntegration_RestoreSkipsExistingSession(t *testing.T) {
 	repoRoot := gitRepoRoot(t)
 
 	branch, wtPath := createTestWorktree(t, repoRoot, "existing1")
-	sessName := tmux.SessionNameFor(branch)
+	sessName := tmux.SessionNameFor(tmux.ProjectName(repoRoot), branch)
 	defer cleanupTestWorktree(t, repoRoot, branch, wtPath)
 	defer cleanupTestSession(t, sessName)
 
@@ -246,7 +237,7 @@ func TestIntegration_RestoreRunsOnCreateHook(t *testing.T) {
 	repoRoot := gitRepoRoot(t)
 
 	branch, wtPath := createTestWorktree(t, repoRoot, "hook1")
-	sessName := tmux.SessionNameFor(branch)
+	sessName := tmux.SessionNameFor(tmux.ProjectName(repoRoot), branch)
 	defer cleanupTestWorktree(t, repoRoot, branch, wtPath)
 	defer cleanupTestSession(t, sessName)
 
@@ -293,7 +284,7 @@ func TestIntegration_RestoreNoHooksWhenDisabled(t *testing.T) {
 	repoRoot := gitRepoRoot(t)
 
 	branch, wtPath := createTestWorktree(t, repoRoot, "nohook1")
-	sessName := tmux.SessionNameFor(branch)
+	sessName := tmux.SessionNameFor(tmux.ProjectName(repoRoot), branch)
 	defer cleanupTestWorktree(t, repoRoot, branch, wtPath)
 	defer cleanupTestSession(t, sessName)
 
@@ -332,7 +323,7 @@ func TestIntegration_RunFullRestore(t *testing.T) {
 	cfg, _ := config.Load(repoRoot)
 
 	branch, wtPath := createTestWorktree(t, repoRoot, "full1")
-	sessName := tmux.SessionNameFor(branch)
+	sessName := tmux.SessionNameFor(tmux.ProjectName(repoRoot), branch)
 	defer cleanupTestWorktree(t, repoRoot, branch, wtPath)
 	defer cleanupTestSession(t, sessName)
 
@@ -375,7 +366,7 @@ func TestIntegration_RestoreMultipleOrphans(t *testing.T) {
 	var created []testWT
 	for _, suffix := range []string{"multi1", "multi2", "multi3"} {
 		branch, wtPath := createTestWorktree(t, repoRoot, suffix)
-		sessName := tmux.SessionNameFor(branch)
+		sessName := tmux.SessionNameFor(tmux.ProjectName(repoRoot), branch)
 		created = append(created, testWT{branch, wtPath, sessName})
 	}
 

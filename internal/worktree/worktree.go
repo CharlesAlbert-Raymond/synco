@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Worktree represents a single git worktree.
@@ -54,13 +56,41 @@ func Add(repoRoot, path, branch string, newBranch bool, startPoint string) error
 	return nil
 }
 
-// Remove removes a worktree at the given path.
+// Remove removes a worktree at the given path (blocking).
 func Remove(repoRoot, path string) error {
 	cmd := exec.Command("git", "worktree", "remove", "--force", path)
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree remove: %s: %w", string(out), err)
 	}
+	return nil
+}
+
+// RemoveFast removes a worktree without blocking on file deletion.
+// It renames the directory to a trash path (instant on the same filesystem),
+// prunes git worktree metadata, then deletes the trashed files in the background.
+func RemoveFast(repoRoot, path string) error {
+	trashPath := path + fmt.Sprintf(".synco-trash-%d", time.Now().UnixNano())
+
+	if err := os.Rename(path, trashPath); err != nil {
+		// Fall back to the blocking path if rename fails (e.g. cross-device)
+		return Remove(repoRoot, path)
+	}
+
+	// Tell git the worktree is gone
+	cmd := exec.Command("git", "worktree", "prune")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// Try to undo the rename so state isn't broken
+		_ = os.Rename(trashPath, path)
+		return fmt.Errorf("git worktree prune: %s: %w", string(out), err)
+	}
+
+	// Delete trashed files in the background
+	go func() {
+		_ = os.RemoveAll(trashPath)
+	}()
+
 	return nil
 }
 

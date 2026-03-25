@@ -26,9 +26,9 @@ const (
 )
 
 // DetectState figures out which of the 4 launch states we're in.
-func DetectState() LaunchState {
+func DetectState(project string) LaunchState {
 	if !IsInsideTmux() {
-		sessions, _ := ListSessions()
+		sessions, _ := ListSessions(project)
 		if len(sessions) > 0 {
 			return OutsideHasSession
 		}
@@ -43,8 +43,8 @@ func DetectState() LaunchState {
 
 // CreateSessionAndAttach creates a new tmux session at repoRoot with sidebar, then attaches.
 func CreateSessionAndAttach(repoRoot string, sidebarWidth string, cfg config.Config) error {
-	// Use the repo directory name as the session base name
-	sessName := SessionNameFor("main")
+	project := ProjectName(repoRoot)
+	sessName := SessionNameFor(project, "main")
 
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessName, "-c", repoRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -74,9 +74,9 @@ func CreateSessionAndAttach(repoRoot string, sidebarWidth string, cfg config.Con
 	return cmd.Run()
 }
 
-// AttachFirstSession attaches to the first available synco session.
-func AttachFirstSession() error {
-	sessions, err := ListSessions()
+// AttachFirstSession attaches to the first available synco session for the given project.
+func AttachFirstSession(project string) error {
+	sessions, err := ListSessions(project)
 	if err != nil || len(sessions) == 0 {
 		return fmt.Errorf("no synco sessions found")
 	}

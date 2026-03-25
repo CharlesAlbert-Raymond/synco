@@ -17,7 +17,8 @@ func CreateWorktree(repoRoot string, cfg config.Config, branch, base string) (wt
 		return "", "", fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	sessName = tmux.SessionNameFor(branch)
+	project := tmux.ProjectName(repoRoot)
+	sessName = tmux.SessionNameFor(project, branch)
 	if err := tmux.NewSession(sessName, wtPath); err != nil {
 		return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
 	}
@@ -42,8 +43,14 @@ func DeleteWorktree(repoRoot string, cfg config.Config, entry state.Entry, opts 
 		return fmt.Errorf("on_destroy hook failed: %w", err)
 	}
 
-	// Remove worktree
-	if err := worktree.Remove(repoRoot, entry.Worktree.Path); err != nil {
+	// Kill tmux session first for instant UI feedback
+	if entry.HasSession {
+		_ = tmux.KillSession(entry.SessionName)
+	}
+
+	// Fast-remove worktree: rename to trash dir, prune git metadata,
+	// then delete files in the background
+	if err := worktree.RemoveFast(repoRoot, entry.Worktree.Path); err != nil {
 		return fmt.Errorf("failed to remove worktree: %w", err)
 	}
 
@@ -52,11 +59,6 @@ func DeleteWorktree(repoRoot string, cfg config.Config, entry state.Entry, opts 
 		if err := worktree.DeleteBranch(repoRoot, entry.BranchShort); err != nil {
 			return fmt.Errorf("worktree removed but branch delete failed: %w", err)
 		}
-	}
-
-	// Kill tmux session
-	if entry.HasSession {
-		_ = tmux.KillSession(entry.SessionName)
 	}
 
 	return nil

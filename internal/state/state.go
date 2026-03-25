@@ -31,12 +31,14 @@ type GatherResult struct {
 // Gather produces the full list of entries by joining worktrees with tmux sessions,
 // plus port info for all tmux sessions.
 func Gather(repoRoot string) (*GatherResult, error) {
+	project := tmux.ProjectName(repoRoot)
+
 	wts, err := worktree.List(repoRoot)
 	if err != nil {
 		return nil, err
 	}
 
-	sessions, err := tmux.ListSessions()
+	sessions, err := tmux.ListSessions(project)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +64,7 @@ func Gather(repoRoot string) (*GatherResult, error) {
 			branch = "(detached)"
 		}
 
-		sessName := tmux.SessionNameFor(branch)
+		sessName := tmux.SessionNameFor(project, branch)
 		sess := sessionMap[sessName]
 		syncoSessions[sessName] = true
 

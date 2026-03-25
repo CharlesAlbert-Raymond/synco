@@ -36,12 +36,12 @@ func ApplyTheme(session string, theme *config.Theme) error {
 	return nil
 }
 
-// ApplyThemeToAllSessions applies theme to all existing synco sessions.
-func ApplyThemeToAllSessions(theme *config.Theme) {
+// ApplyThemeToAllSessions applies theme to all existing synco sessions for the given project.
+func ApplyThemeToAllSessions(project string, theme *config.Theme) {
 	if theme == nil {
 		return
 	}
-	sessions, err := ListSessions()
+	sessions, err := ListSessions(project)
 	if err != nil {
 		return
 	}
