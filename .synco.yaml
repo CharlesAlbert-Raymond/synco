@@ -12,6 +12,13 @@ theme:
   pane_border_active: "#7aa2f7"
   pane_border_labels: true
 
+notifications:
+  enabled: true
+  silence_seconds: 10
+  bell: true
+  system_notification: true
+  sound: "Glass"
+
 layouts:
   default:
     panes:

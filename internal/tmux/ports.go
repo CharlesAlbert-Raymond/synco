@@ -22,7 +22,6 @@ func PortsBySession() map[string][]int {
 		return nil
 	}
 
-	sessionPanes := make(map[string][]int)  // session → root pane PIDs
 	allRoots := make(map[int]string)        // root PID → session name
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
@@ -34,7 +33,6 @@ func PortsBySession() map[string][]int {
 		if err != nil {
 			continue
 		}
-		sessionPanes[parts[0]] = append(sessionPanes[parts[0]], pid)
 		allRoots[pid] = parts[0]
 	}
 

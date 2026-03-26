@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -16,6 +17,10 @@ import (
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 	"github.com/charles-albert-raymond/synco/internal/tui"
 )
+
+// sourceDir is set at build time via -ldflags to the synco source directory.
+// When set, ctrl+r in the TUI can rebuild the binary from source.
+var sourceDir string
 
 func main() {
 	// Handle subcommands before flag parsing
@@ -90,20 +95,28 @@ func main() {
 
 	case *sidebarFlag:
 		// Internal: run the compact sidebar TUI
-		m := tui.NewSidebarModel(repoRoot, cfg)
+		m := tui.NewSidebarModel(repoRoot, cfg, sourceDir)
 		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithReportFocus())
-		if _, err := p.Run(); err != nil {
+		final, err := p.Run()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
+		}
+		if fm, ok := final.(tui.Model); ok && fm.RestartRequested {
+			reexec()
 		}
 
 	case *classicFlag:
 		// Original full-screen TUI
-		m := tui.NewModel(repoRoot, cfg)
+		m := tui.NewModel(repoRoot, cfg, sourceDir)
 		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithReportFocus())
-		if _, err := p.Run(); err != nil {
+		final, err := p.Run()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
+		}
+		if fm, ok := final.(tui.Model); ok && fm.RestartRequested {
+			reexec()
 		}
 
 	default:
@@ -190,6 +203,19 @@ func loadConfig(repoRoot string) config.Config {
 		cfg = config.Config{WorktreeDir: ".."}
 	}
 	return cfg
+}
+
+// reexec replaces the current process with a fresh instance of the same binary.
+func reexec() {
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error finding executable: %v\n", err)
+		os.Exit(1)
+	}
+	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error re-executing: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func findGitRoot() (string, error) {

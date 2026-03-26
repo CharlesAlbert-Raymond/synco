@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -71,9 +72,7 @@ func (m listModel) Update(msg tea.Msg, repoRoot string) (listModel, tea.Cmd) {
 	case entriesMsg:
 		m.entries = msg.entries
 		m.otherPorts = msg.otherPorts
-		if m.cursor >= len(m.entries) {
-			m.cursor = max(0, len(m.entries)-1)
-		}
+		m.clampCursor()
 		return m, m.detectSilence()
 
 	case attachMsg:
@@ -83,53 +82,40 @@ func (m listModel) Update(msg tea.Msg, repoRoot string) (listModel, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch {
-		case msg.String() == "j" || msg.String() == "down":
-			if m.cursor < len(m.entries)-1 {
-				m.cursor++
-			}
-		case msg.String() == "k" || msg.String() == "up":
-			if m.cursor > 0 {
-				m.cursor--
-			}
+		case msg.String() == "j" || msg.String() == "down" ||
+			msg.String() == "k" || msg.String() == "up":
+			m.moveCursor(msg.String())
 		case msg.String() == "enter":
 			if len(m.entries) == 0 {
 				return m, nil
 			}
 			entry := m.entries[m.cursor]
-			sessionName := entry.SessionName
-			m.clearNotification(sessionName)
+			m.clearNotification(entry.SessionName)
 
-			// Create session if it doesn't exist
-			if !entry.HasSession {
-				if err := tmux.NewSession(sessionName, entry.Worktree.Path); err != nil {
-					m.message = fmt.Sprintf("Error creating session: %v", err)
-					m.msgStyle = errorStyle
-					return m, nil
-				}
-				if layout := m.config.DefaultLayout(); layout != nil {
-					_ = tmux.ApplyLayout(sessionName, layout)
-				}
-				_ = tmux.ApplyTheme(sessionName, m.config.Theme)
+			if err := m.ensureSession(entry); err != nil {
+				m.message = fmt.Sprintf("Error creating session: %v", err)
+				m.msgStyle = errorStyle
+				return m, nil
 			}
 
 			if tmux.IsInsideTmux() {
-				if err := tmux.SwitchClient(sessionName); err != nil {
+				if err := tmux.SwitchClient(entry.SessionName); err != nil {
 					m.message = fmt.Sprintf("Error switching: %v", err)
 					m.msgStyle = errorStyle
 					return m, nil
 				}
-				m.message = fmt.Sprintf("Switched to %s", sessionName)
+				m.message = fmt.Sprintf("Switched to %s", entry.SessionName)
 				m.msgStyle = successStyle
 				return m, fetchEntries(repoRoot)
 			}
 
 			// Outside tmux: use tea.Exec to attach
-			c := &tmuxExecCmd{cmd: exec.Command("tmux", "attach-session", "-t", sessionName)}
+			c := &tmuxExecCmd{cmd: exec.Command("tmux", "attach-session", "-t", entry.SessionName)}
 			return m, tea.Exec(c, func(err error) tea.Msg {
 				if err != nil {
 					return errMsg{err}
 				}
-				return attachMsg{session: sessionName}
+				return attachMsg{session: entry.SessionName}
 			})
 		}
 	}
@@ -146,8 +132,8 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 		if m.resetCursorOnNext {
 			m.resetCursorToCurrent()
 			m.resetCursorOnNext = false
-		} else if m.cursor >= len(m.entries) {
-			m.cursor = max(0, len(m.entries)-1)
+		} else {
+			m.clampCursor()
 		}
 		return m, m.detectSilence()
 
@@ -158,51 +144,38 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 
 	case tea.KeyMsg:
 		switch {
-		case msg.String() == "j" || msg.String() == "down":
-			if m.cursor < len(m.entries)-1 {
-				m.cursor++
-			}
-		case msg.String() == "k" || msg.String() == "up":
-			if m.cursor > 0 {
-				m.cursor--
-			}
+		case msg.String() == "j" || msg.String() == "down" ||
+			msg.String() == "k" || msg.String() == "up":
+			m.moveCursor(msg.String())
 		case msg.String() == "enter":
 			if len(m.entries) == 0 {
 				return m, nil
 			}
 			entry := m.entries[m.cursor]
-			sessionName := entry.SessionName
-			m.clearNotification(sessionName)
+			m.clearNotification(entry.SessionName)
 
-			// Create the worktree's tmux session if it doesn't exist
-			if !entry.HasSession {
-				if err := tmux.NewSession(sessionName, entry.Worktree.Path); err != nil {
-					m.message = fmt.Sprintf("Error creating session: %v", err)
-					m.msgStyle = errorStyle
-					return m, nil
-				}
-				if layout := m.config.DefaultLayout(); layout != nil {
-					_ = tmux.ApplyLayout(sessionName, layout)
-				}
-				_ = tmux.ApplyTheme(sessionName, m.config.Theme)
+			if err := m.ensureSession(entry); err != nil {
+				m.message = fmt.Sprintf("Error creating session: %v", err)
+				m.msgStyle = errorStyle
+				return m, nil
 			}
 
 			// Ensure the target session has a sidebar pane
-			if err := tmux.EnsureSidebar(sessionName, repoRoot); err != nil {
+			if err := tmux.EnsureSidebar(entry.SessionName, repoRoot); err != nil {
 				m.message = fmt.Sprintf("Error adding sidebar: %v", err)
 				m.msgStyle = errorStyle
 				return m, nil
 			}
 
 			// Switch the tmux client to the worktree's session
-			if err := tmux.SwitchClient(sessionName); err != nil {
+			if err := tmux.SwitchClient(entry.SessionName); err != nil {
 				m.message = fmt.Sprintf("Error switching: %v", err)
 				m.msgStyle = errorStyle
 				return m, nil
 			}
 
 			// Focus the main work pane (not the sidebar) in the target session
-			tmux.FocusMainPane(sessionName)
+			tmux.FocusMainPane(entry.SessionName)
 
 			m.message = fmt.Sprintf("→ %s", entry.BranchShort)
 			m.msgStyle = successStyle
@@ -210,6 +183,36 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 		}
 	}
 	return m, nil
+}
+
+// moveCursor handles j/k/up/down key navigation.
+func (m *listModel) moveCursor(key string) {
+	switch key {
+	case "j", "down":
+		if m.cursor < len(m.entries)-1 {
+			m.cursor++
+		}
+	case "k", "up":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	}
+}
+
+// clampCursor ensures the cursor is within bounds of the entries slice.
+func (m *listModel) clampCursor() {
+	if m.cursor >= len(m.entries) {
+		m.cursor = max(0, len(m.entries)-1)
+	}
+}
+
+// ensureSession creates a tmux session for the entry if one doesn't exist.
+// Returns an error message suitable for display, or empty string on success.
+func (m *listModel) ensureSession(entry state.Entry) error {
+	if entry.HasSession {
+		return nil
+	}
+	return tmux.NewSessionWithLayout(entry.SessionName, entry.Worktree.Path, m.config)
 }
 
 // resetCursorToCurrent moves the cursor to the entry marked IsCurrent.
@@ -221,9 +224,7 @@ func (m *listModel) resetCursorToCurrent() {
 			return
 		}
 	}
-	if m.cursor >= len(m.entries) {
-		m.cursor = max(0, len(m.entries)-1)
-	}
+	m.clampCursor()
 }
 
 // ViewCompact renders a narrow sidebar-friendly view with per-worktree cards.
@@ -369,7 +370,7 @@ func (m listModel) ViewCompact(width int) string {
 	parts = append(parts, helpBoxStyle.Render(
 		lipgloss.NewStyle().Foreground(colorMuted).Render("↵ open · c new · d del")+
 			"\n"+
-			lipgloss.NewStyle().Foreground(colorMuted).Render("esc back · ? cfg · q quit"),
+			lipgloss.NewStyle().Foreground(colorMuted).Render("^r build · ? cfg · q quit"),
 	))
 
 	return strings.Join(parts, "\n")
@@ -463,7 +464,7 @@ func (m listModel) View() string {
 }
 
 func (m listModel) renderHelp() string {
-	help := "  enter attach • c create • d delete • r refresh • ? config • q quit"
+	help := "  enter attach • c create • d delete • r refresh • ^r rebuild • ? config • q quit"
 	return helpStyle.Render(help)
 }
 
@@ -483,10 +484,11 @@ func formatPorts(ports []int) string {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-1] + "…"
+	runes := []rune(s)
+	return string(runes[:maxLen-1]) + "…"
 }
 
 // detectSilence checks for signal files written by `synco notify` (triggered
@@ -500,7 +502,7 @@ func (m *listModel) detectSilence() tea.Cmd {
 
 	for _, entry := range m.entries {
 		sess := entry.SessionName
-		if !entry.HasSession || entry.IsCurrent {
+		if !entry.HasSession {
 			delete(m.silentSessions, sess)
 			delete(m.notified, sess)
 			continue
@@ -548,11 +550,13 @@ func sendBellCmd() tea.Cmd {
 
 func sendSystemNotificationCmd(branch, sound string) tea.Cmd {
 	return func() tea.Msg {
-		script := fmt.Sprintf(
-			`display notification "Agent idle on %s" with title "synco" sound name "%s"`,
-			branch, sound,
+		script := `display notification "Claude finished working on this branch." with title "🎵 synco" subtitle (system attribute "SYNCO_BRANCH") sound name (system attribute "SYNCO_SOUND")`
+		cmd := exec.Command("osascript", "-e", script)
+		cmd.Env = append(os.Environ(),
+			"SYNCO_BRANCH="+branch,
+			"SYNCO_SOUND="+sound,
 		)
-		_ = exec.Command("osascript", "-e", script).Run()
+		_ = cmd.Run()
 		return nil
 	}
 }

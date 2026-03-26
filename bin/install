@@ -9,7 +9,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$(go env GOPATH)/bin"
 
 echo "Installing synco → ${DEST}/synco"
-(cd "$PROJECT_DIR" && go build -o "${DEST}/synco" .)
+(cd "$PROJECT_DIR" && go build -ldflags "-X main.sourceDir=${PROJECT_DIR}" -o "${DEST}/synco" .)
 echo "Done."
 
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$DEST"; then

@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,22 +27,25 @@ const (
 type errMsg struct{ error }
 type tickMsg time.Time
 type popupDoneMsg struct{}
+type rebuildDoneMsg struct{ err error }
 
 type Model struct {
-	currentView view
-	list        listModel
-	create      createModel
-	confirm     confirmModel
-	configView  configViewModel
-	repoRoot    string
-	config      config.Config
-	width       int
-	height      int
-	err         error
-	sidebarMode bool
+	currentView      view
+	list             listModel
+	create           createModel
+	confirm          confirmModel
+	configView       configViewModel
+	repoRoot         string
+	config           config.Config
+	width            int
+	height           int
+	err              error
+	sidebarMode      bool
+	sourceDir        string // synco source dir for rebuilding (set via ldflags)
+	RestartRequested bool   // signals main() to re-exec after quit
 }
 
-func NewModel(repoRoot string, cfg config.Config) Model {
+func NewModel(repoRoot string, cfg config.Config, sourceDir string) Model {
 	lm := newListModel()
 	lm.config = cfg
 	return Model{
@@ -47,10 +53,11 @@ func NewModel(repoRoot string, cfg config.Config) Model {
 		list:        lm,
 		repoRoot:    repoRoot,
 		config:      cfg,
+		sourceDir:   sourceDir,
 	}
 }
 
-func NewSidebarModel(repoRoot string, cfg config.Config) Model {
+func NewSidebarModel(repoRoot string, cfg config.Config, sourceDir string) Model {
 	lm := newListModel()
 	lm.config = cfg
 	return Model{
@@ -59,6 +66,7 @@ func NewSidebarModel(repoRoot string, cfg config.Config) Model {
 		repoRoot:    repoRoot,
 		config:      cfg,
 		sidebarMode: true,
+		sourceDir:   sourceDir,
 	}
 }
 
@@ -105,6 +113,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tickCmd()
 
+	case rebuildDoneMsg:
+		if msg.err != nil {
+			m.list.message = fmt.Sprintf("Rebuild failed: %v", msg.err)
+			m.list.msgStyle = errorStyle
+			m.currentView = viewList
+			return m, nil
+		}
+		m.RestartRequested = true
+		return m, tea.Quit
+
 	case errMsg:
 		m.err = msg.error
 		m.list.message = msg.Error()
@@ -116,6 +134,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
+		case "ctrl+r":
+			return m, m.rebuildCmd()
 		case "q":
 			if m.currentView == viewList {
 				return m, tea.Quit
@@ -285,6 +305,27 @@ func launchDeletePopup(repoRoot string, branch string) tea.Cmd {
 			60, 20, "Delete Worktree",
 		)
 		return popupDoneMsg{}
+	}
+}
+
+// rebuildCmd rebuilds the synco binary from source and signals a restart.
+// If no source directory is available, it reloads config only and re-execs.
+func (m Model) rebuildCmd() tea.Cmd {
+	return func() tea.Msg {
+		if m.sourceDir != "" {
+			exe, err := os.Executable()
+			if err != nil {
+				return rebuildDoneMsg{err: fmt.Errorf("find executable: %w", err)}
+			}
+			cmd := exec.Command("go", "build", "-o", exe, ".")
+			cmd.Dir = m.sourceDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return rebuildDoneMsg{err: fmt.Errorf("%s: %w", string(out), err)}
+			}
+		}
+		// Even without sourceDir, signal restart to reload config + pick up
+		// any externally updated binary.
+		return rebuildDoneMsg{}
 	}
 }
 

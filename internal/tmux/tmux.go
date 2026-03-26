@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+
+	"github.com/charles-albert-raymond/synco/internal/config"
 )
 
 // Session represents a tmux session managed by synco.
@@ -107,6 +109,20 @@ func NewSession(name, workdir string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux new-session: %s: %w", string(out), err)
 	}
+	return nil
+}
+
+// NewSessionWithLayout creates a detached tmux session and applies the
+// configured layout and theme. This is the standard entry point for session
+// creation so that all callers get consistent behavior.
+func NewSessionWithLayout(name, workdir string, cfg config.Config) error {
+	if err := NewSession(name, workdir); err != nil {
+		return err
+	}
+	if layout := cfg.DefaultLayout(); layout != nil {
+		_ = ApplyLayout(name, layout)
+	}
+	_ = ApplyTheme(name, cfg.Theme)
 	return nil
 }
 

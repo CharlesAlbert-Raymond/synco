@@ -11,7 +11,6 @@ var (
 	colorDanger    = lipgloss.Color("#EF4444") // red
 	colorMuted     = lipgloss.Color("#6B7280") // gray
 	colorText      = lipgloss.Color("#E5E7EB") // light gray
-	colorBg         = lipgloss.Color("#1F2937") // dark bg
 	colorBgAlt      = lipgloss.Color("#374151") // slightly lighter
 	colorWarningDim = lipgloss.Color("#92400E") // dark amber — current + selected
 
@@ -29,9 +28,6 @@ var (
 				Background(colorBgAlt).
 				Foreground(colorText).
 				Bold(true)
-
-	normalRowStyle = lipgloss.NewStyle().
-			Foreground(colorText)
 
 	branchStyle = lipgloss.NewStyle().
 			Foreground(colorSecondary).

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
+	"github.com/charles-albert-raymond/synco/internal/notify"
 	"github.com/charles-albert-raymond/synco/internal/orchestrate"
 	"github.com/charles-albert-raymond/synco/internal/state"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
@@ -26,7 +27,8 @@ var listWorktreesTool = mcp.NewTool("synco_list_worktrees",
 var createWorktreeTool = mcp.NewTool("synco_create_worktree",
 	mcp.WithDescription("Create a new git worktree with a tmux session. Optionally runs the on_create hook."),
 	mcp.WithString("branch", mcp.Required(), mcp.Description("Branch name to create (e.g. 'feature/auth-refactor').")),
-	mcp.WithString("base", mcp.Description("Base branch or commit to branch from. Defaults to HEAD.")),
+	mcp.WithString("base", mcp.Description("Base branch or commit to branch from. Defaults to HEAD. Ignored when existing_branch is true.")),
+	mcp.WithBoolean("existing_branch", mcp.Description("If true, use an existing local or remote branch instead of creating a new one.")),
 )
 
 var deleteWorktreeTool = mcp.NewTool("synco_delete_worktree",
@@ -147,7 +149,10 @@ func (tc *toolContext) handleListWorktrees(_ context.Context, req mcp.CallToolRe
 		return errResult("failed to gather worktree state: %v", err)
 	}
 
-	cfg, _ := config.Load(tc.repoRoot)
+	cfg, err := config.Load(tc.repoRoot)
+	if err != nil {
+		return errResult("failed to load config: %v", err)
+	}
 
 	infos := make([]worktreeInfo, len(result.Entries))
 	for i, e := range result.Entries {
@@ -173,10 +178,19 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 	if branch == "" {
 		return errResult("branch is required")
 	}
-	base := stringArg(req, "base")
 
-	cfg, _ := config.Load(tc.repoRoot)
-	wtPath, sessName, err := orchestrate.CreateWorktree(tc.repoRoot, cfg, branch, base)
+	cfg, err := config.Load(tc.repoRoot)
+	if err != nil {
+		return errResult("failed to load config: %v", err)
+	}
+
+	var wtPath, sessName string
+	if existing, _ := boolArg(req, "existing_branch"); existing {
+		wtPath, sessName, err = orchestrate.CreateWorktreeFromExisting(tc.repoRoot, cfg, branch)
+	} else {
+		base := stringArg(req, "base")
+		wtPath, sessName, err = orchestrate.CreateWorktree(tc.repoRoot, cfg, branch, base)
+	}
 	if err != nil {
 		return errResult("%v", err)
 	}
@@ -208,7 +222,10 @@ func (tc *toolContext) handleDeleteWorktree(_ context.Context, req mcp.CallToolR
 		return errResult("cannot delete the main worktree")
 	}
 
-	cfg, _ := config.Load(tc.repoRoot)
+	cfg, err := config.Load(tc.repoRoot)
+	if err != nil {
+		return errResult("failed to load config: %v", err)
+	}
 
 	deleteBranch := cfg.ShouldDeleteBranch()
 	if v, ok := boolArg(req, "delete_branch"); ok {
@@ -249,14 +266,13 @@ func (tc *toolContext) handleSwitchSession(_ context.Context, req mcp.CallToolRe
 
 	// Auto-create session if worktree exists but session doesn't (matches TUI behavior)
 	if !entry.HasSession {
-		if err := tmux.NewSession(sessName, entry.Worktree.Path); err != nil {
+		cfg, err := config.Load(tc.repoRoot)
+		if err != nil {
+			return errResult("failed to load config: %v", err)
+		}
+		if err := tmux.NewSessionWithLayout(sessName, entry.Worktree.Path, cfg); err != nil {
 			return errResult("failed to create session: %v", err)
 		}
-		cfg, _ := config.Load(tc.repoRoot)
-		if layout := cfg.DefaultLayout(); layout != nil {
-			_ = tmux.ApplyLayout(sessName, layout)
-		}
-		_ = tmux.ApplyTheme(sessName, cfg.Theme)
 	}
 
 	if err := tmux.SwitchClient(sessName); err != nil {
@@ -304,12 +320,22 @@ func (tc *toolContext) handleGetConfig(_ context.Context, req mcp.CallToolReques
 		return errResult("failed to load config: %v", err)
 	}
 
+	notifInfo := map[string]any{
+		"enabled":             cfg.NotificationsEnabled(),
+		"bell":                cfg.BellEnabled(),
+		"system_notification": cfg.SystemNotificationEnabled(),
+		"sound":               cfg.NotificationSound(),
+		"silence_seconds":     cfg.SilenceThreshold(),
+		"hook_configured":     notify.IsHookConfigured(),
+	}
+
 	return textResult(map[string]any{
 		"worktree_dir":       cfg.WorktreeDir,
 		"on_create":          cfg.OnCreate,
 		"on_destroy":         cfg.OnDestroy,
 		"auto_delete_branch": cfg.ShouldDeleteBranch(),
 		"aliases":            cfg.Aliases,
+		"notifications":      notifInfo,
 		"global_config_path": config.GlobalConfigPath(),
 		"local_config_path":  tc.repoRoot + "/.synco.yaml",
 	})

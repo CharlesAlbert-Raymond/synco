@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -123,8 +124,15 @@ func (c Config) ShouldDeleteBranch() bool {
 // Load reads the global config then the local config, merging them.
 // Local fields override global when set.
 func Load(repoRoot string) (Config, error) {
-	global, _ := loadFile(globalConfigPath())
-	local, _ := loadFile(filepath.Join(repoRoot, ".synco.yaml"))
+	global, err := loadFile(globalConfigPath())
+	if err != nil && !os.IsNotExist(err) {
+		return Config{}, fmt.Errorf("global config: %w", err)
+	}
+
+	local, err := loadFile(filepath.Join(repoRoot, ".synco.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		return Config{}, fmt.Errorf("local config: %w", err)
+	}
 
 	merged := merge(global, local)
 

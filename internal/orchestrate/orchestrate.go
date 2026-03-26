@@ -20,15 +20,9 @@ func CreateWorktree(repoRoot string, cfg config.Config, branch, base string) (wt
 
 	project := tmux.ProjectName(repoRoot)
 	sessName = tmux.SessionNameFor(project, branch)
-	if err := tmux.NewSession(sessName, wtPath); err != nil {
+	if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
 		return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
 	}
-
-	// Apply layout and theme so new worktree sessions match the root session.
-	if layout := cfg.DefaultLayout(); layout != nil {
-		_ = tmux.ApplyLayout(sessName, layout)
-	}
-	_ = tmux.ApplyTheme(sessName, cfg.Theme)
 
 	if err := config.RunHookInTmux(sessName, cfg.OnCreate, branch, wtPath); err != nil {
 		return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
@@ -54,15 +48,9 @@ func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, branch strin
 
 	project := tmux.ProjectName(repoRoot)
 	sessName = tmux.SessionNameFor(project, localBranch)
-	if err := tmux.NewSession(sessName, wtPath); err != nil {
+	if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
 		return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
 	}
-
-	// Apply layout and theme so new worktree sessions match the root session.
-	if layout := cfg.DefaultLayout(); layout != nil {
-		_ = tmux.ApplyLayout(sessName, layout)
-	}
-	_ = tmux.ApplyTheme(sessName, cfg.Theme)
 
 	if err := config.RunHookInTmux(sessName, cfg.OnCreate, localBranch, wtPath); err != nil {
 		return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
