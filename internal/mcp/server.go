@@ -16,6 +16,7 @@ type toolContext struct {
 func Serve(repoRoot string) error {
 	s := server.NewMCPServer("synco", "1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithInstructions(instructions),
 	)
 
 	ctx := &toolContext{repoRoot: repoRoot}

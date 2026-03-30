@@ -15,8 +15,8 @@ theme:
 notifications:
   enabled: true
   silence_seconds: 10
-  bell: true
-  system_notification: true
+  bell: false
+  system_notification: false
   sound: "Glass"
 
 layouts:
