@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
+	"github.com/charles-albert-raymond/synco/internal/metadata"
 	"github.com/charles-albert-raymond/synco/internal/notify"
 	"github.com/charles-albert-raymond/synco/internal/orchestrate"
 	"github.com/charles-albert-raymond/synco/internal/state"
@@ -29,6 +31,7 @@ var createWorktreeTool = mcp.NewTool("synco_create_worktree",
 	mcp.WithString("branch", mcp.Required(), mcp.Description("Branch name to create (e.g. 'feature/auth-refactor').")),
 	mcp.WithString("base", mcp.Description("Base branch or commit to branch from. Defaults to HEAD. Ignored when existing_branch is true.")),
 	mcp.WithBoolean("existing_branch", mcp.Description("If true, use an existing local or remote branch instead of creating a new one.")),
+	mcp.WithString("title", mcp.Description("Optional human-readable title for the worktree card.")),
 )
 
 var deleteWorktreeTool = mcp.NewTool("synco_delete_worktree",
@@ -70,6 +73,12 @@ var inspectTaskTool = mcp.NewTool("synco_inspect_task",
 	mcp.WithString("filename", mcp.Description("File to read. Defaults to TICKET.md.")),
 	mcp.WithReadOnlyHintAnnotation(true),
 	mcp.WithDestructiveHintAnnotation(false),
+)
+
+var setWorktreeTitleTool = mcp.NewTool("synco_set_worktree_title",
+	mcp.WithDescription("Set or clear the human-readable title for a worktree card."),
+	mcp.WithString("branch", mcp.Required(), mcp.Description("Branch name of the worktree.")),
+	mcp.WithString("title", mcp.Required(), mcp.Description("Title to set. Pass empty string to clear.")),
 )
 
 // --- Helpers ---
@@ -132,6 +141,7 @@ func (tc *toolContext) resolveSessionName(branch string) (string, error) {
 
 type worktreeInfo struct {
 	Branch      string `json:"branch"`
+	Title       string `json:"title,omitempty"`
 	Alias       string `json:"alias,omitempty"`
 	Path        string `json:"path"`
 	HEAD        string `json:"head"`
@@ -158,6 +168,7 @@ func (tc *toolContext) handleListWorktrees(_ context.Context, req mcp.CallToolRe
 	for i, e := range result.Entries {
 		infos[i] = worktreeInfo{
 			Branch:      e.BranchShort,
+			Title:       e.Title,
 			Alias:       cfg.AliasFor(e.BranchShort),
 			Path:        e.Worktree.Path,
 			HEAD:        e.Worktree.HEAD,
@@ -193,6 +204,21 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 	}
 	if err != nil {
 		return errResult("%v", err)
+	}
+
+	// Save optional title
+	title := stringArg(req, "title")
+	if title != "" {
+		store, err := metadata.Load(tc.repoRoot, cfg.WorktreeDir)
+		if err == nil {
+			// For existing remote branches, use the local branch name
+			metaKey := branch
+			if idx := strings.Index(branch, "/"); idx != -1 && !strings.HasPrefix(branch, "refs/") {
+				metaKey = branch[idx+1:]
+			}
+			store.SetTitle(metaKey, title)
+			_ = store.Save(tc.repoRoot, cfg.WorktreeDir)
+		}
 	}
 
 	return textResult(map[string]string{
@@ -235,6 +261,12 @@ func (tc *toolContext) handleDeleteWorktree(_ context.Context, req mcp.CallToolR
 	opts := orchestrate.DeleteWorktreeOpts{DeleteBranch: deleteBranch}
 	if err := orchestrate.DeleteWorktree(tc.repoRoot, cfg, entry, opts); err != nil {
 		return errResult("%v", err)
+	}
+
+	// Clean up metadata
+	if store, err := metadata.Load(tc.repoRoot, cfg.WorktreeDir); err == nil {
+		store.Delete(branch)
+		_ = store.Save(tc.repoRoot, cfg.WorktreeDir)
 	}
 
 	return textResult(map[string]any{
@@ -368,6 +400,44 @@ func (tc *toolContext) handleSessionOutput(_ context.Context, req mcp.CallToolRe
 	return textResult(map[string]string{
 		"session": sessName,
 		"output":  output,
+	})
+}
+
+func (tc *toolContext) handleSetWorktreeTitle(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	branch := stringArg(req, "branch")
+	if branch == "" {
+		return errResult("branch is required")
+	}
+	title := stringArg(req, "title")
+
+	cfg, err := config.Load(tc.repoRoot)
+	if err != nil {
+		return errResult("failed to load config: %v", err)
+	}
+
+	store, err := metadata.Load(tc.repoRoot, cfg.WorktreeDir)
+	if err != nil {
+		return errResult("failed to load metadata: %v", err)
+	}
+
+	if title == "" {
+		store.Delete(branch)
+	} else {
+		store.SetTitle(branch, title)
+	}
+
+	if err := store.Save(tc.repoRoot, cfg.WorktreeDir); err != nil {
+		return errResult("failed to save metadata: %v", err)
+	}
+
+	action := "set"
+	if title == "" {
+		action = "cleared"
+	}
+	return textResult(map[string]string{
+		"status": action,
+		"branch": branch,
+		"title":  title,
 	})
 }
 

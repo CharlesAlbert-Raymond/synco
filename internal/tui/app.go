@@ -6,10 +6,12 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
+	"github.com/charles-albert-raymond/synco/internal/metadata"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 )
 
@@ -22,6 +24,7 @@ const (
 	viewCreate
 	viewConfirmDelete
 	viewConfig
+	viewEditTitle
 )
 
 type errMsg struct{ error }
@@ -35,6 +38,7 @@ type Model struct {
 	create           createModel
 	confirm          confirmModel
 	configView       configViewModel
+	editTitle        editTitleModel
 	repoRoot         string
 	config           config.Config
 	width            int
@@ -152,6 +156,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConfirm(msg)
 	case viewConfig:
 		return m.updateConfig(msg)
+	case viewEditTitle:
+		return m.updateEditTitle(msg)
 	}
 
 	return m, nil
@@ -168,6 +174,16 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = viewCreate
 			m.create = newCreateModel(m.repoRoot, m.config)
 			return m, m.create.branchInput.Focus()
+		case "e":
+			if len(m.list.entries) > 0 {
+				entry := m.list.entries[m.list.cursor]
+				if m.sidebarMode {
+					return m, launchEditTitlePopup(m.repoRoot, entry.BranchShort, entry.Title)
+				}
+				m.currentView = viewEditTitle
+				m.editTitle = newEditTitleModel(entry.BranchShort, entry.Title, m.repoRoot, m.config)
+				return m, textinput.Blink
+			}
 		case "d":
 			if len(m.list.entries) > 0 {
 				entry := m.list.entries[m.list.cursor]
@@ -218,6 +234,9 @@ func (m Model) updateCreate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewList
 		m.list.message = "Worktree created successfully"
 		m.list.msgStyle = successStyle
+		if msg.title != "" {
+			m.saveTitle(msg.branch, msg.title)
+		}
 		return m, fetchEntries(m.repoRoot)
 	}
 
@@ -237,6 +256,7 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewList
 		m.list.message = "Worktree deleted"
 		m.list.msgStyle = successStyle
+		m.deleteTitle(m.confirm.entry.BranchShort)
 		return m, fetchEntries(m.repoRoot)
 	}
 
@@ -255,6 +275,48 @@ func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateEditTitle(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "esc" {
+			m.currentView = viewList
+			return m, nil
+		}
+	case editTitleDoneMsg:
+		m.currentView = viewList
+		m.saveTitle(msg.branch, msg.title)
+		m.list.message = "Title updated"
+		m.list.msgStyle = successStyle
+		return m, fetchEntries(m.repoRoot)
+	}
+
+	var cmd tea.Cmd
+	m.editTitle, cmd = m.editTitle.Update(msg)
+	return m, cmd
+}
+
+func (m Model) saveTitle(branch, title string) {
+	store, err := metadata.Load(m.repoRoot, m.config.WorktreeDir)
+	if err != nil {
+		return
+	}
+	if title == "" {
+		store.Delete(branch)
+	} else {
+		store.SetTitle(branch, title)
+	}
+	_ = store.Save(m.repoRoot, m.config.WorktreeDir)
+}
+
+func (m Model) deleteTitle(branch string) {
+	store, err := metadata.Load(m.repoRoot, m.config.WorktreeDir)
+	if err != nil {
+		return
+	}
+	store.Delete(branch)
+	_ = store.Save(m.repoRoot, m.config.WorktreeDir)
+}
+
 func (m Model) View() string {
 	var content string
 
@@ -266,6 +328,8 @@ func (m Model) View() string {
 			content = m.list.ViewCompact(m.width) + "\n" + m.create.View()
 		case viewConfirmDelete:
 			content = m.list.ViewCompact(m.width) + "\n" + m.confirm.View()
+		case viewEditTitle:
+			content = m.list.ViewCompact(m.width) + "\n" + m.editTitle.View()
 		case viewConfig:
 			content = m.configView.View()
 		}
@@ -277,6 +341,8 @@ func (m Model) View() string {
 			content = m.list.View() + "\n\n" + m.create.View()
 		case viewConfirmDelete:
 			content = m.list.View() + "\n\n" + m.confirm.View()
+		case viewEditTitle:
+			content = m.list.View() + "\n\n" + m.editTitle.View()
 		case viewConfig:
 			content = m.configView.View()
 		}
@@ -294,6 +360,17 @@ func launchCreatePopup(repoRoot string) tea.Cmd {
 			[]string{"--popup-create", "--root", repoRoot},
 			70, 28, "Create Worktree",
 		)
+		return popupDoneMsg{}
+	}
+}
+
+func launchEditTitlePopup(repoRoot string, branch, currentTitle string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"--popup-edit-title", "--root", repoRoot, "--branch", branch}
+		if currentTitle != "" {
+			args = append(args, "--title", currentTitle)
+		}
+		_ = tmux.LaunchPopup(args, 60, 14, "Edit Title")
 		return popupDoneMsg{}
 	}
 }

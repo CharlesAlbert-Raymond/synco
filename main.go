@@ -52,7 +52,9 @@ func main() {
 	rootFlag := flag.String("root", "", "repo root path (used internally by sidebar)")
 	popupCreateFlag := flag.Bool("popup-create", false, "run create form as popup (internal)")
 	popupDeleteFlag := flag.Bool("popup-delete", false, "run delete confirm as popup (internal)")
-	branchFlag := flag.String("branch", "", "branch name for popup-delete (internal)")
+	popupEditTitleFlag := flag.Bool("popup-edit-title", false, "run edit title form as popup (internal)")
+	branchFlag := flag.String("branch", "", "branch name for popup operations (internal)")
+	titleFlag := flag.String("title", "", "current title for popup-edit-title (internal)")
 	flag.Parse()
 
 	repoRoot := resolveRepoRoot(*rootFlag)
@@ -73,7 +75,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Error: --branch is required for --popup-delete")
 			os.Exit(1)
 		}
-		result, err := state.Gather(repoRoot)
+		result, err := state.Gather(repoRoot, cfg.WorktreeDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -90,6 +92,19 @@ func main() {
 			os.Exit(1)
 		}
 		m := tui.NewPopupConfirmModel(*found, repoRoot, cfg)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case *popupEditTitleFlag:
+		branch := *branchFlag
+		if branch == "" {
+			fmt.Fprintln(os.Stderr, "Error: --branch is required for --popup-edit-title")
+			os.Exit(1)
+		}
+		m := tui.NewPopupEditTitleModel(branch, *titleFlag, repoRoot, cfg)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)

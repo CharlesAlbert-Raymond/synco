@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/charles-albert-raymond/synco/internal/metadata"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 	"github.com/charles-albert-raymond/synco/internal/worktree"
 )
@@ -9,6 +10,7 @@ import (
 type Entry struct {
 	Worktree    worktree.Worktree
 	BranchShort string
+	Title       string // user-defined title from metadata store
 	SessionName string
 	TmuxSession *tmux.Session
 	HasSession  bool
@@ -29,8 +31,9 @@ type GatherResult struct {
 }
 
 // Gather produces the full list of entries by joining worktrees with tmux sessions,
-// plus port info for all tmux sessions.
-func Gather(repoRoot string) (*GatherResult, error) {
+// plus port info for all tmux sessions. worktreeDir is used to locate the metadata
+// store; pass "" to use the default ".worktrees".
+func Gather(repoRoot string, worktreeDir ...string) (*GatherResult, error) {
 	project := tmux.ProjectName(repoRoot)
 
 	wts, err := worktree.List(repoRoot)
@@ -47,6 +50,13 @@ func Gather(repoRoot string) (*GatherResult, error) {
 	for i := range sessions {
 		sessionMap[sessions[i].Name] = &sessions[i]
 	}
+
+	// Load per-worktree metadata (titles etc.)
+	wtDir := ".worktrees"
+	if len(worktreeDir) > 0 && worktreeDir[0] != "" {
+		wtDir = worktreeDir[0]
+	}
+	meta, _ := metadata.Load(repoRoot, wtDir)
 
 	// Batch-fetch listening ports for all tmux sessions
 	portsBySession := tmux.PortsBySession()
@@ -77,6 +87,7 @@ func Gather(repoRoot string) (*GatherResult, error) {
 		entries = append(entries, Entry{
 			Worktree:    wt,
 			BranchShort: branch,
+			Title:       meta.Title(branch),
 			SessionName: sessName,
 			TmuxSession: sess,
 			HasSession:  sess != nil,

@@ -26,23 +26,29 @@ type createModel struct {
 
 	// New branch fields
 	branchInput textinput.Model
+	titleInput  textinput.Model
 	baseInput   textinput.Model
-	focusIndex  int // 0=branch, 1=base (new mode)
+	focusIndex  int // 0=branch, 1=title, 2=base (new mode)
 
 	// Existing branch fields
-	filterInput textinput.Model
-	allBranches []string // combined local + remote
-	filtered    []string // branches matching filter
-	branchIdx   int      // cursor in filtered list
-	fetching    bool     // true while git fetch is running
-	fetched     bool     // true once branches have been loaded
+	filterInput   textinput.Model
+	existTitleInput textinput.Model
+	allBranches   []string // combined local + remote
+	filtered      []string // branches matching filter
+	branchIdx     int      // cursor in filtered list
+	fetching      bool     // true while git fetch is running
+	fetched       bool     // true once branches have been loaded
+	existFocusIdx int      // 0=filter, 1=title (existing mode)
 
 	err      string
 	repoRoot string
 	config   config.Config
 }
 
-type createDoneMsg struct{}
+type createDoneMsg struct {
+	branch string
+	title  string
+}
 
 // branchesMsg is sent when branch listing completes.
 type branchesMsg struct {
@@ -59,6 +65,13 @@ func newCreateModel(repoRoot string, cfg config.Config) createModel {
 	bi.PromptStyle = inputLabelStyle
 	bi.TextStyle = lipgloss.NewStyle().Foreground(colorText)
 
+	ti := textinput.New()
+	ti.Placeholder = "optional short description"
+	ti.CharLimit = 60
+	ti.Width = 40
+	ti.PromptStyle = inputLabelStyle
+	ti.TextStyle = lipgloss.NewStyle().Foreground(colorText)
+
 	base := textinput.New()
 	base.Placeholder = "HEAD (default)"
 	base.CharLimit = 100
@@ -73,13 +86,22 @@ func newCreateModel(repoRoot string, cfg config.Config) createModel {
 	fi.PromptStyle = inputLabelStyle
 	fi.TextStyle = lipgloss.NewStyle().Foreground(colorText)
 
+	eti := textinput.New()
+	eti.Placeholder = "optional short description"
+	eti.CharLimit = 60
+	eti.Width = 40
+	eti.PromptStyle = inputLabelStyle
+	eti.TextStyle = lipgloss.NewStyle().Foreground(colorText)
+
 	return createModel{
-		mode:        modeNewBranch,
-		branchInput: bi,
-		baseInput:   base,
-		filterInput: fi,
-		repoRoot:    repoRoot,
-		config:      cfg,
+		mode:            modeNewBranch,
+		branchInput:     bi,
+		titleInput:      ti,
+		baseInput:       base,
+		filterInput:     fi,
+		existTitleInput: eti,
+		repoRoot:        repoRoot,
+		config:          cfg,
 	}
 }
 
@@ -146,8 +168,11 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 				m.mode = modeExistingBranch
 				m.err = ""
 				m.branchInput.Blur()
+				m.titleInput.Blur()
 				m.baseInput.Blur()
+				m.existFocusIdx = 0
 				m.filterInput.Focus()
+				m.existTitleInput.Blur()
 				if !m.fetched {
 					m.fetching = true
 					return m, fetchBranchesCmd(m.repoRoot)
@@ -157,6 +182,7 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 			m.mode = modeNewBranch
 			m.err = ""
 			m.filterInput.Blur()
+			m.existTitleInput.Blur()
 			m.branchInput.Focus()
 			m.focusIndex = 0
 			return m, nil
@@ -167,6 +193,16 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 		case "tab", "shift+tab":
 			if m.mode == modeNewBranch {
 				return m.toggleNewBranchFocus()
+			}
+			// Toggle filter <-> title in existing mode
+			if m.existFocusIdx == 0 {
+				m.existFocusIdx = 1
+				m.filterInput.Blur()
+				m.existTitleInput.Focus()
+			} else {
+				m.existFocusIdx = 0
+				m.existTitleInput.Blur()
+				m.filterInput.Focus()
 			}
 			return m, nil
 		}
@@ -181,6 +217,10 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 	// Non-key messages: update the active input
 	if m.mode == modeExistingBranch {
 		var cmd tea.Cmd
+		if m.existFocusIdx == 1 {
+			m.existTitleInput, cmd = m.existTitleInput.Update(msg)
+			return m, cmd
+		}
 		prev := m.filterInput.Value()
 		m.filterInput, cmd = m.filterInput.Update(msg)
 		if m.filterInput.Value() != prev {
@@ -190,9 +230,12 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	if m.focusIndex == 0 {
+	switch m.focusIndex {
+	case 0:
 		m.branchInput, cmd = m.branchInput.Update(msg)
-	} else {
+	case 1:
+		m.titleInput, cmd = m.titleInput.Update(msg)
+	case 2:
 		m.baseInput, cmd = m.baseInput.Update(msg)
 	}
 	return m, cmd
@@ -205,12 +248,13 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 			m.err = "Branch name is required"
 			return m, nil
 		}
+		title := strings.TrimSpace(m.titleInput.Value())
 		base := strings.TrimSpace(m.baseInput.Value())
 		if _, _, err := orchestrate.CreateWorktree(m.repoRoot, m.config, branch, base); err != nil {
 			m.err = fmt.Sprintf("Failed: %v", err)
 			return m, nil
 		}
-		return m, func() tea.Msg { return createDoneMsg{} }
+		return m, func() tea.Msg { return createDoneMsg{branch: branch, title: title} }
 	}
 
 	// Existing branch mode
@@ -219,37 +263,56 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 		return m, nil
 	}
 	branch := m.filtered[m.branchIdx]
+	title := strings.TrimSpace(m.existTitleInput.Value())
 	if _, _, err := orchestrate.CreateWorktreeFromExisting(m.repoRoot, m.config, branch); err != nil {
 		m.err = fmt.Sprintf("Failed: %v", err)
 		return m, nil
 	}
-	return m, func() tea.Msg { return createDoneMsg{} }
+	// Strip remote prefix for the local branch used as metadata key
+	localBranch := branch
+	if idx := strings.Index(branch, "/"); idx != -1 && !strings.HasPrefix(branch, "refs/") {
+		localBranch = branch[idx+1:]
+	}
+	return m, func() tea.Msg { return createDoneMsg{branch: localBranch, title: title} }
 }
 
 func (m createModel) toggleNewBranchFocus() (createModel, tea.Cmd) {
-	if m.focusIndex == 0 {
-		m.focusIndex = 1
-		m.branchInput.Blur()
-		m.baseInput.Focus()
-	} else {
-		m.focusIndex = 0
-		m.baseInput.Blur()
+	m.branchInput.Blur()
+	m.titleInput.Blur()
+	m.baseInput.Blur()
+	m.focusIndex = (m.focusIndex + 1) % 3
+	switch m.focusIndex {
+	case 0:
 		m.branchInput.Focus()
+	case 1:
+		m.titleInput.Focus()
+	case 2:
+		m.baseInput.Focus()
 	}
 	return m, nil
 }
 
 func (m createModel) updateNew(msg tea.KeyMsg) (createModel, tea.Cmd) {
 	var cmd tea.Cmd
-	if m.focusIndex == 0 {
+	switch m.focusIndex {
+	case 0:
 		m.branchInput, cmd = m.branchInput.Update(msg)
-	} else {
+	case 1:
+		m.titleInput, cmd = m.titleInput.Update(msg)
+	case 2:
 		m.baseInput, cmd = m.baseInput.Update(msg)
 	}
 	return m, cmd
 }
 
 func (m createModel) updateExisting(msg tea.KeyMsg) (createModel, tea.Cmd) {
+	// When title input is focused, only pass keys to it
+	if m.existFocusIdx == 1 {
+		var cmd tea.Cmd
+		m.existTitleInput, cmd = m.existTitleInput.Update(msg)
+		return m, cmd
+	}
+
 	switch msg.String() {
 	case "down", "ctrl+n":
 		if m.branchIdx < len(m.filtered)-1 {
@@ -333,7 +396,7 @@ func (m createModel) View() string {
 	if m.mode == modeNewBranch {
 		b.WriteString(helpStyle.Render(" enter submit • tab switch field • ctrl+e existing • esc cancel"))
 	} else {
-		b.WriteString(helpStyle.Render(" enter submit • ↑/↓ select • ctrl+e new branch • esc cancel"))
+		b.WriteString(helpStyle.Render(" enter submit • tab title • ↑/↓ select • ctrl+e new branch • esc cancel"))
 	}
 
 	return borderStyle.Render(b.String())
@@ -345,6 +408,11 @@ func (m createModel) viewNewBranch(b *strings.Builder) {
 	b.WriteString(m.branchInput.View())
 	b.WriteString("\n\n")
 
+	b.WriteString(inputLabelStyle.Render("Title (optional):"))
+	b.WriteString("\n")
+	b.WriteString(m.titleInput.View())
+	b.WriteString("\n\n")
+
 	b.WriteString(inputLabelStyle.Render("Base branch (optional):"))
 	b.WriteString("\n")
 	b.WriteString(m.baseInput.View())
@@ -354,6 +422,11 @@ func (m createModel) viewExistingBranch(b *strings.Builder) {
 	b.WriteString(inputLabelStyle.Render("Filter:"))
 	b.WriteString("\n")
 	b.WriteString(m.filterInput.View())
+	b.WriteString("\n\n")
+
+	b.WriteString(inputLabelStyle.Render("Title (optional):"))
+	b.WriteString("\n")
+	b.WriteString(m.existTitleInput.View())
 	b.WriteString("\n\n")
 
 	if m.fetching {
