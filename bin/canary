@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Build and install synco-canary to GOPATH/bin.
+# Identical to bin/install but produces a separate "synco-canary" binary
+# tagged with buildChannel=canary so it can be distinguished at runtime.
+#
+# Usage:
+#   bin/canary
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+DEST="$(go env GOPATH)/bin"
+
+echo "Installing synco-canary → ${DEST}/synco-canary"
+(cd "$PROJECT_DIR" && go build \
+    -ldflags "-X main.sourceDir=${PROJECT_DIR} -X main.buildChannel=canary" \
+    -o "${DEST}/synco-canary" .)
+echo "Done."
+
+if ! echo "$PATH" | tr ':' '\n' | grep -qx "$DEST"; then
+    echo ""
+    echo "Note: ${DEST} is not in your PATH. Add it with:"
+    echo "  export PATH=\"${DEST}:\$PATH\""
+fi

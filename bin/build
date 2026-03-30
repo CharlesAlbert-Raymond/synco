@@ -15,5 +15,5 @@ if [[ "${1:-}" == "-o" ]]; then
 fi
 
 echo "Building synco → ${OUTPUT}"
-(cd "$PROJECT_DIR" && go build -ldflags "-X main.sourceDir=${PROJECT_DIR}" -o "$OUTPUT" .)
+(cd "$PROJECT_DIR" && go build -ldflags "-X main.sourceDir=${PROJECT_DIR} -X main.buildChannel=stable" -o "$OUTPUT" .)
 echo "Done."

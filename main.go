@@ -22,6 +22,9 @@ import (
 // When set, ctrl+r in the TUI can rebuild the binary from source.
 var sourceDir string
 
+// buildChannel is set at build time via -ldflags ("stable" or "canary").
+var buildChannel string
+
 func main() {
 	// Handle subcommands before flag parsing
 	if len(os.Args) > 1 {
