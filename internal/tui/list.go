@@ -256,9 +256,12 @@ func (m listModel) ViewCompact(width int) string {
 
 	// Render a card for each worktree
 	for i, entry := range m.entries {
-		// Resolve display name: alias > branch
-		alias := m.config.AliasFor(entry.BranchShort)
-		displayName := alias
+		// Resolve display name: title > alias > branch
+		displayName := entry.Title
+		if displayName == "" {
+			displayName = m.config.AliasFor(entry.BranchShort)
+		}
+		showBranchBelow := displayName != ""
 		if displayName == "" {
 			displayName = entry.BranchShort
 		}
@@ -316,8 +319,8 @@ func (m listModel) ViewCompact(width int) string {
 		nameLine = nameLine + strings.Repeat(" ", gap) + dot
 		lines = append(lines, nameLine)
 
-		// Line 2: show branch name when an alias is set (so you can see the real branch)
-		if alias != "" {
+		// Line 2: show branch name when a title or alias provides the primary label
+		if showBranchBelow {
 			branchLine := pathStyle.Render(truncate(entry.BranchShort, innerWidth))
 			lines = append(lines, branchLine)
 		}
@@ -368,9 +371,9 @@ func (m listModel) ViewCompact(width int) string {
 
 	// Help footer
 	parts = append(parts, helpBoxStyle.Render(
-		lipgloss.NewStyle().Foreground(colorMuted).Render("↵ open · c new · d del")+
+		lipgloss.NewStyle().Foreground(colorMuted).Render("↵ open · c new · e title")+
 			"\n"+
-			lipgloss.NewStyle().Foreground(colorMuted).Render("^r build · ? cfg · q quit"),
+			lipgloss.NewStyle().Foreground(colorMuted).Render("d del · ^r build · ? cfg · q"),
 	))
 
 	return strings.Join(parts, "\n")
@@ -406,14 +409,18 @@ func (m listModel) View() string {
 			cursor = " ▸ "
 		}
 
-		// Branch name
+		// Branch / title display
 		branch := entry.BranchShort
 		bStyle := branchStyle
 		if entry.Worktree.IsMain {
 			bStyle = mainBranchStyle
 			branch += " ★"
 		}
-		branchStr := bStyle.Render(fmt.Sprintf("%-25s", truncate(branch, 25)))
+		display := branch
+		if entry.Title != "" {
+			display = truncate(entry.Title, 14) + " " + lipgloss.NewStyle().Foreground(colorMuted).Render("("+truncate(entry.BranchShort, 9)+")")
+		}
+		branchStr := bStyle.Render(fmt.Sprintf("%-25s", truncate(display, 25)))
 
 		// Session status
 		var sessStr string
@@ -464,7 +471,7 @@ func (m listModel) View() string {
 }
 
 func (m listModel) renderHelp() string {
-	help := "  enter attach • c create • d delete • r refresh • ^r rebuild • ? config • q quit"
+	help := "  enter attach • c create • e title • d delete • r refresh • ^r rebuild • ? config • q quit"
 	return helpStyle.Render(help)
 }
 
