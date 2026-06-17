@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
+	"github.com/charles-albert-raymond/synco/internal/session"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 )
 
@@ -50,9 +51,9 @@ func resolveSession(cwd string) (string, error) {
 	}
 
 	// Resolve project name from config if available, fall back to dir name
-	mainRoot := tmux.MainWorktreeRoot(cwd)
+	mainRoot := session.MainWorktreeRoot(cwd)
 	cfg, _ := config.Load(mainRoot)
-	project := tmux.ResolveProjectName(cwd, cfg.ProjectName)
+	project := session.ResolveProjectName(cwd, cfg.ProjectName)
 	if project == "" {
 		return "", fmt.Errorf("not a git repo")
 	}
@@ -62,7 +63,7 @@ func resolveSession(cwd string) (string, error) {
 
 	var sessionKey string
 	if filepath.Clean(cwd) == filepath.Clean(mainRoot) {
-		sessionKey = tmux.RootSessionKey
+		sessionKey = session.RootKey
 	} else {
 		branch, err := gitBranch(cwd)
 		if err != nil {
@@ -71,7 +72,7 @@ func resolveSession(cwd string) (string, error) {
 		sessionKey = branch
 	}
 
-	return tmux.SessionNameFor(project, sessionKey), nil
+	return session.SessionNameFor(project, sessionKey), nil
 }
 
 // gitBranch returns the current branch name for the given directory.

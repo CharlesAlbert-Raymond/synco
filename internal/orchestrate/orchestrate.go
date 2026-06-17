@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
+	"github.com/charles-albert-raymond/synco/internal/session"
 	"github.com/charles-albert-raymond/synco/internal/state"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 	"github.com/charles-albert-raymond/synco/internal/worktree"
@@ -107,8 +108,8 @@ func validateCreationProfile(profile config.CreationProfile) error {
 }
 
 func createSessionForProfile(repoRoot string, cfg config.Config, profile config.CreationProfile, branch, wtPath string) (string, error) {
-	project := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
-	sessName := tmux.SessionNameFor(project, branch)
+	project := session.ResolveProjectName(repoRoot, cfg.ProjectName)
+	sessName := session.SessionNameFor(project, branch)
 	if tmux.SessionExists(sessName) {
 		return sessName, nil
 	}

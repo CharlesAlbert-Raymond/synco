@@ -13,6 +13,7 @@ import (
 	"github.com/charles-albert-raymond/synco/internal/config"
 	syncmcp "github.com/charles-albert-raymond/synco/internal/mcp"
 	"github.com/charles-albert-raymond/synco/internal/notify"
+	"github.com/charles-albert-raymond/synco/internal/session"
 	"github.com/charles-albert-raymond/synco/internal/state"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 	"github.com/charles-albert-raymond/synco/internal/tui"
@@ -150,7 +151,7 @@ func launch(repoRoot string, cfg config.Config) {
 		sidebarWidth = "28"
 	}
 
-	project := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
+	project := session.ResolveProjectName(repoRoot, cfg.ProjectName)
 
 	// Migrate old-format sessions (project-branch → project/branch) on launch
 	tmux.MigrateSessionNames(project)
@@ -211,7 +212,7 @@ func launchProjectMode(projectName string) {
 	// Migrate sessions for each repo in the project
 	for _, repo := range repos {
 		repoCfg := loadConfig(repo)
-		project := tmux.ResolveProjectName(repo, repoCfg.ProjectName)
+		project := session.ResolveProjectName(repo, repoCfg.ProjectName)
 		tmux.MigrateSessionNames(project)
 	}
 
@@ -248,7 +249,7 @@ func resolveRepoRoot(flagValue string) string {
 	}
 	// Always resolve to the main worktree root so that synco launched from a
 	// linked worktree uses the same repo root as the main worktree.
-	return tmux.MainWorktreeRoot(root)
+	return session.MainWorktreeRoot(root)
 }
 
 func loadConfig(repoRoot string) config.Config {
@@ -288,5 +289,5 @@ func findGitRoot() (string, error) {
 	}
 	toplevel := strings.TrimSpace(string(out))
 	// Resolve to the main worktree root in case CWD is inside a linked worktree
-	return tmux.MainWorktreeRoot(toplevel), nil
+	return session.MainWorktreeRoot(toplevel), nil
 }

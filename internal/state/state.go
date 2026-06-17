@@ -3,6 +3,7 @@ package state
 import (
 	"github.com/charles-albert-raymond/synco/internal/config"
 	"github.com/charles-albert-raymond/synco/internal/metadata"
+	"github.com/charles-albert-raymond/synco/internal/session"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 	"github.com/charles-albert-raymond/synco/internal/worktree"
 )
@@ -11,7 +12,7 @@ import (
 // Passing "root" returns the main (root) worktree entry regardless of its
 // current branch, giving callers a stable way to address the root worktree.
 func FindEntry(entries []Entry, branch string) (Entry, bool) {
-	if branch == tmux.RootSessionKey {
+	if branch == session.RootKey {
 		for _, e := range entries {
 			if e.Worktree.IsMain {
 				return e, true
@@ -35,10 +36,10 @@ type Entry struct {
 	SessionName string
 	TmuxSession *tmux.Session
 	HasSession  bool
-	Ports     []int // TCP ports being listened on in this session
-	IsCurrent bool  // true if this is the worktree whose tmux session we're in
-	RepoRoot  string // repo root path (set in multi-repo mode)
-	RepoLabel string // display label for the repo (set in multi-repo mode)
+	Ports       []int  // TCP ports being listened on in this session
+	IsCurrent   bool   // true if this is the worktree whose tmux session we're in
+	RepoRoot    string // repo root path (set in multi-repo mode)
+	RepoLabel   string // display label for the repo (set in multi-repo mode)
 }
 
 // SessionPorts holds port info for a non-synco tmux session.
@@ -49,8 +50,8 @@ type SessionPorts struct {
 
 // GatherResult contains entries and port info for other tmux sessions.
 type GatherResult struct {
-	Entries       []Entry
-	OtherPorts    []SessionPorts // non-synco sessions with listening ports
+	Entries    []Entry
+	OtherPorts []SessionPorts // non-synco sessions with listening ports
 }
 
 // GatherOpts controls how Gather operates.
@@ -71,7 +72,7 @@ func Gather(repoRoot string, worktreeDir ...string) (*GatherResult, error) {
 
 // GatherWithOpts is like Gather but accepts structured options.
 func GatherWithOpts(repoRoot string, opts GatherOpts) (*GatherResult, error) {
-	project := tmux.ResolveProjectName(repoRoot, opts.ProjectName)
+	project := session.ResolveProjectName(repoRoot, opts.ProjectName)
 
 	wts, err := worktree.List(repoRoot)
 	if err != nil {
@@ -115,9 +116,9 @@ func GatherWithOpts(repoRoot string, opts GatherOpts) (*GatherResult, error) {
 		// doesn't change when the user switches branches on the root.
 		sessionKey := branch
 		if wt.IsMain {
-			sessionKey = tmux.RootSessionKey
+			sessionKey = session.RootKey
 		}
-		sessName := tmux.SessionNameFor(project, sessionKey)
+		sessName := session.SessionNameFor(project, sessionKey)
 		sess := sessionMap[sessName]
 		syncoSessions[sessName] = true
 
@@ -169,7 +170,7 @@ func GatherMulti(repos []string) (*GatherResult, error) {
 			continue
 		}
 
-		label := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
+		label := session.ResolveProjectName(repoRoot, cfg.ProjectName)
 		for i := range result.Entries {
 			result.Entries[i].RepoRoot = repoRoot
 			result.Entries[i].RepoLabel = label

@@ -9,6 +9,7 @@ import (
 
 	"github.com/charles-albert-raymond/synco/internal/config"
 	"github.com/charles-albert-raymond/synco/internal/orchestrate"
+	"github.com/charles-albert-raymond/synco/internal/session"
 	"github.com/charles-albert-raymond/synco/internal/state"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 )
@@ -46,8 +47,8 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 			if m.entry.HasSession {
 				if current, err := tmux.CurrentSessionName(); err == nil && current == m.entry.SessionName {
 					deletingSelf = true
-					project := tmux.ResolveProjectName(m.repoRoot, m.config.ProjectName)
-					mainSession := tmux.SessionNameFor(project, tmux.RootSessionKey)
+					project := session.ResolveProjectName(m.repoRoot, m.config.ProjectName)
+					mainSession := session.SessionNameFor(project, session.RootKey)
 					_ = tmux.NewSession(mainSession, m.repoRoot) // may already exist
 					_ = tmux.EnsureSidebar(mainSession, m.repoRoot, m.config.SidebarWidth)
 					_ = tmux.SwitchClient(mainSession)

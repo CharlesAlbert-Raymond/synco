@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
+	"github.com/charles-albert-raymond/synco/internal/session"
 )
 
 const defaultSidebarWidth = "28"
@@ -64,8 +65,8 @@ func termSize() (cols, rows uint16) {
 
 // CreateSessionAndAttach creates a new tmux session at repoRoot with sidebar, then attaches.
 func CreateSessionAndAttach(repoRoot string, sidebarWidth string, cfg config.Config) error {
-	project := ResolveProjectName(repoRoot, cfg.ProjectName)
-	sessName := SessionNameFor(project, RootSessionKey)
+	project := session.ResolveProjectName(repoRoot, cfg.ProjectName)
+	sessName := session.SessionNameFor(project, session.RootKey)
 
 	args := []string{"new-session", "-d", "-s", sessName, "-c", repoRoot}
 	// Set the detached session size to match the current terminal so that
