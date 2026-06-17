@@ -8,6 +8,13 @@ on_create: ""
 on_destroy: ""
 auto_delete_branch: true
 
+default_creation_profile: dev
+
+creation_profiles:
+  inspect:
+    create_session: true
+    run_on_create: false
+
 theme:
   pane_border: "#3a3a3a"
   pane_border_active: "#7aa2f7"
