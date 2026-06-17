@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
 	"github.com/charles-albert-raymond/synco/internal/metadata"
@@ -28,9 +27,9 @@ var listWorktreesTool = mcp.NewTool("synco_list_worktrees",
 
 var createWorktreeTool = mcp.NewTool("synco_create_worktree",
 	mcp.WithDescription("Create a new git worktree with a tmux session. Optionally runs the on_create hook."),
-	mcp.WithString("branch", mcp.Required(), mcp.Description("Branch name to create (e.g. 'feature/auth-refactor').")),
+	mcp.WithString("branch", mcp.Required(), mcp.Description("Branch name to create, or an existing local/remote branch when existing_branch is true (e.g. 'feature/auth-refactor' or 'origin/feature/auth-refactor').")),
 	mcp.WithString("base", mcp.Description("Base branch or commit to branch from. Defaults to HEAD. Ignored when existing_branch is true.")),
-	mcp.WithBoolean("existing_branch", mcp.Description("If true, use an existing local or remote branch instead of creating a new one.")),
+	mcp.WithBoolean("existing_branch", mcp.Description("If true, use an existing local or remote branch instead of creating a new one. Remote branches create a local tracking branch; use the returned branch value for follow-up tool calls.")),
 	mcp.WithString("title", mcp.Description("Optional human-readable title for the worktree card.")),
 )
 
@@ -202,7 +201,10 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 	}
 
 	var wtPath, sessName string
-	if existing, _ := boolArg(req, "existing_branch"); existing {
+	resultBranch := branch
+	existing, _ := boolArg(req, "existing_branch")
+	if existing {
+		resultBranch = orchestrate.ExistingBranchLocalName(tc.repoRoot, branch)
 		wtPath, sessName, err = orchestrate.CreateWorktreeFromExisting(tc.repoRoot, cfg, branch)
 	} else {
 		base := stringArg(req, "base")
@@ -217,21 +219,17 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 	if title != "" {
 		store, err := metadata.Load(tc.repoRoot, cfg.WorktreeDir)
 		if err == nil {
-			// For existing remote branches, use the local branch name
-			metaKey := branch
-			if idx := strings.Index(branch, "/"); idx != -1 && !strings.HasPrefix(branch, "refs/") {
-				metaKey = branch[idx+1:]
-			}
-			store.SetTitle(metaKey, title)
+			store.SetTitle(resultBranch, title)
 			_ = store.Save(tc.repoRoot, cfg.WorktreeDir)
 		}
 	}
 
 	return textResult(map[string]string{
-		"status":       "created",
-		"branch":       branch,
-		"path":         wtPath,
-		"session_name": sessName,
+		"status":        "created",
+		"branch":        resultBranch,
+		"source_branch": branch,
+		"path":          wtPath,
+		"session_name":  sessName,
 	})
 }
 

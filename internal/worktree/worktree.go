@@ -56,6 +56,21 @@ func Add(repoRoot, path, branch string, newBranch bool, startPoint string) error
 	return nil
 }
 
+// AddTracking creates a worktree with a new local branch tracking a remote branch.
+func AddTracking(repoRoot, path, localBranch, remoteBranch string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command("git", "worktree", "add", "--track", "-b", localBranch, absPath, remoteBranch)
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add --track: %s: %w", string(out), err)
+	}
+	return nil
+}
+
 // Remove removes a worktree at the given path (blocking).
 func Remove(repoRoot, path string) error {
 	cmd := exec.Command("git", "worktree", "remove", "--force", path)
@@ -141,6 +156,13 @@ func RemoteBranchList(repoRoot string) ([]string, error) {
 		branches = append(branches, b)
 	}
 	return branches, nil
+}
+
+// RemoteBranchExists reports whether branch names an existing remote ref like origin/feature-x.
+func RemoteBranchExists(repoRoot, branch string) bool {
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/remotes/"+branch)
+	cmd.Dir = repoRoot
+	return cmd.Run() == nil
 }
 
 // Fetch runs git fetch --prune to update remote refs.

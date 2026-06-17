@@ -31,14 +31,14 @@ type createModel struct {
 	focusIndex  int // 0=branch, 1=title, 2=base (new mode)
 
 	// Existing branch fields
-	filterInput   textinput.Model
+	filterInput     textinput.Model
 	existTitleInput textinput.Model
-	allBranches   []string // combined local + remote
-	filtered      []string // branches matching filter
-	branchIdx     int      // cursor in filtered list
-	fetching      bool     // true while git fetch is running
-	fetched       bool     // true once branches have been loaded
-	existFocusIdx int      // 0=filter, 1=title (existing mode)
+	allBranches     []string // combined local + remote
+	filtered        []string // branches matching filter
+	branchIdx       int      // cursor in filtered list
+	fetching        bool     // true while git fetch is running
+	fetched         bool     // true once branches have been loaded
+	existFocusIdx   int      // 0=filter, 1=title (existing mode)
 
 	err      string
 	repoRoot string
@@ -269,10 +269,7 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 		return m, nil
 	}
 	// Strip remote prefix for the local branch used as metadata key
-	localBranch := branch
-	if idx := strings.Index(branch, "/"); idx != -1 && !strings.HasPrefix(branch, "refs/") {
-		localBranch = branch[idx+1:]
-	}
+	localBranch := orchestrate.ExistingBranchLocalName(m.repoRoot, branch)
 	return m, func() tea.Msg { return createDoneMsg{branch: localBranch, title: title} }
 }
 

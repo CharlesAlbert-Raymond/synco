@@ -27,6 +27,7 @@ This is the most common pattern: the user describes a task, you create a worktre
 ## Important conventions
 
 - **Branch names are the primary identifier.** All tools take a "branch" parameter — use the short name (e.g. "feat/auth-refactor", not "refs/heads/feat/auth-refactor").
+- **Existing remote branches are source branches only.** When calling synco_create_worktree with existing_branch=true, branch may be a remote ref like "origin/feat/auth-refactor". Synco creates a local tracking branch and returns its local name; use that returned branch for all follow-up tool calls.
 - **Always list before creating.** Call synco_list_worktrees first to avoid duplicates.
 - **Check session output after sending commands.** Don't assume success — verify with synco_session_output.
 - **The main worktree cannot be deleted.** This is enforced by the tool.

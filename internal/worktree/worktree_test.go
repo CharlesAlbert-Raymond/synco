@@ -1,6 +1,12 @@
 package worktree
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParsePorcelain(t *testing.T) {
 	input := []byte(`worktree /home/user/repo
@@ -69,4 +75,67 @@ branch refs/heads/main`)
 	if wts[0].Branch != "main" {
 		t.Errorf("Branch = %q, want main", wts[0].Branch)
 	}
+}
+
+func TestAddTrackingCreatesLocalTrackingBranch(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, "", "init", "--bare", remote)
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	runGit(t, "", "clone", remote, repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	runGit(t, repo, "checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "initial")
+	runGit(t, repo, "push", "origin", "HEAD:main")
+	runGit(t, repo, "checkout", "-b", "feature/remote")
+	if err := os.WriteFile(filepath.Join(repo, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "feature.txt")
+	runGit(t, repo, "commit", "-m", "feature")
+	runGit(t, repo, "push", "origin", "feature/remote")
+	runGit(t, repo, "checkout", "main")
+	runGit(t, repo, "branch", "-D", "feature/remote")
+
+	if !RemoteBranchExists(repo, "origin/feature/remote") {
+		t.Fatal("expected origin/feature/remote to exist")
+	}
+
+	wtPath := filepath.Join(repo, ".worktrees", "feature-remote")
+	if err := AddTracking(repo, wtPath, "feature/remote", "origin/feature/remote"); err != nil {
+		t.Fatalf("AddTracking failed: %v", err)
+	}
+
+	branch := strings.TrimSpace(runGitOutput(t, wtPath, "branch", "--show-current"))
+	if branch != "feature/remote" {
+		t.Fatalf("branch = %q, want feature/remote", branch)
+	}
+
+	upstream := strings.TrimSpace(runGitOutput(t, wtPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+	if upstream != "origin/feature/remote" {
+		t.Fatalf("upstream = %q, want origin/feature/remote", upstream)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = runGitOutput(t, dir, args...)
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %s: %v", strings.Join(args, " "), string(out), err)
+	}
+	return string(out)
 }

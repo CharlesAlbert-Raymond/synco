@@ -34,15 +34,16 @@ func CreateWorktree(repoRoot string, cfg config.Config, branch, base string) (wt
 // CreateWorktreeFromExisting creates a worktree from an existing branch (local or remote).
 // For remote branches like "origin/feature-x", it creates a local tracking branch "feature-x".
 func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, branch string) (wtPath, sessName string, err error) {
-	// Strip remote prefix for the local branch name and worktree path
-	localBranch := branch
-	if idx := strings.Index(branch, "/"); idx != -1 && !strings.HasPrefix(branch, "refs/") {
-		localBranch = branch[idx+1:]
-	}
+	localBranch := ExistingBranchLocalName(repoRoot, branch)
 
 	wtPath = cfg.WorktreePath(repoRoot, localBranch)
 
-	if err := worktree.Add(repoRoot, wtPath, branch, false, ""); err != nil {
+	if worktree.RemoteBranchExists(repoRoot, branch) {
+		err = worktree.AddTracking(repoRoot, wtPath, localBranch, branch)
+	} else {
+		err = worktree.Add(repoRoot, wtPath, branch, false, "")
+	}
+	if err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w", err)
 	}
 
@@ -57,6 +58,21 @@ func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, branch strin
 	}
 
 	return wtPath, sessName, nil
+}
+
+// ExistingBranchLocalName returns the local branch name used for an existing branch selection.
+func ExistingBranchLocalName(repoRoot, branch string) string {
+	if worktree.RemoteBranchExists(repoRoot, branch) {
+		return strings.TrimPrefix(branch, remoteName(branch)+"/")
+	}
+	return branch
+}
+
+func remoteName(branch string) string {
+	if idx := strings.Index(branch, "/"); idx != -1 {
+		return branch[:idx]
+	}
+	return branch
 }
 
 // DeleteWorktreeOpts controls delete behavior.
