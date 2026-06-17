@@ -85,6 +85,17 @@ func (m configViewModel) View() string {
 		}
 	}
 
+	if len(m.config.Scripts) > 0 {
+		b.WriteString("\n")
+		b.WriteString(headerStyle.Render("Scripts"))
+		b.WriteString("\n")
+		for name, script := range m.config.Scripts {
+			b.WriteString(labelStyle.Render("  " + name + ":"))
+			b.WriteString(valueStyle.Render(script.Path))
+			b.WriteString("\n")
+		}
+	}
+
 	if len(m.config.CreationProfiles) > 0 {
 		b.WriteString("\n")
 		b.WriteString(headerStyle.Render("Creation Profiles"))
@@ -93,6 +104,9 @@ func (m configViewModel) View() string {
 			detail := fmt.Sprintf("session=%t, on_create=%t", profile.ShouldCreateSession(), profile.ShouldRunOnCreate())
 			if profile.Bootstrap != "" {
 				detail += ", bootstrap=true"
+			}
+			if scriptDetail := lifecycleScriptDetail(profile); scriptDetail != "" {
+				detail += ", " + scriptDetail
 			}
 			b.WriteString(labelStyle.Render("  " + name + ":"))
 			b.WriteString(valueStyle.Render(detail))
@@ -164,4 +178,21 @@ func (m configViewModel) View() string {
 	b.WriteString(helpStyle.Render(" ? close • esc close"))
 
 	return borderStyle.Render(b.String())
+}
+
+func lifecycleScriptDetail(profile config.CreationProfile) string {
+	var parts []string
+	if len(profile.Scripts.BeforeCreate) > 0 {
+		parts = append(parts, fmt.Sprintf("before_create=%d", len(profile.Scripts.BeforeCreate)))
+	}
+	if len(profile.Scripts.AfterCreate) > 0 {
+		parts = append(parts, fmt.Sprintf("after_create=%d", len(profile.Scripts.AfterCreate)))
+	}
+	if len(profile.Scripts.BeforeDestroy) > 0 {
+		parts = append(parts, fmt.Sprintf("before_destroy=%d", len(profile.Scripts.BeforeDestroy)))
+	}
+	if len(profile.Scripts.AfterDestroy) > 0 {
+		parts = append(parts, fmt.Sprintf("after_destroy=%d", len(profile.Scripts.AfterDestroy)))
+	}
+	return strings.Join(parts, ", ")
 }

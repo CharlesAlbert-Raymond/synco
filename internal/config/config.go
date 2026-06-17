@@ -44,11 +44,25 @@ type ProjectDef struct {
 	Repos []string `yaml:"repos"`
 }
 
+// ScriptDef defines a named bash script that profiles can reference.
+type ScriptDef struct {
+	Path string `yaml:"path"`
+}
+
+// LifecycleScripts defines ordered script names for profile lifecycle events.
+type LifecycleScripts struct {
+	BeforeCreate  []string `yaml:"before_create,omitempty"`
+	AfterCreate   []string `yaml:"after_create,omitempty"`
+	BeforeDestroy []string `yaml:"before_destroy,omitempty"`
+	AfterDestroy  []string `yaml:"after_destroy,omitempty"`
+}
+
 // CreationProfile controls which lifecycle steps run when creating a worktree.
 type CreationProfile struct {
-	CreateSession *bool  `yaml:"create_session,omitempty"`
-	RunOnCreate   *bool  `yaml:"run_on_create,omitempty"`
-	Bootstrap     string `yaml:"bootstrap,omitempty"`
+	CreateSession *bool            `yaml:"create_session,omitempty"`
+	RunOnCreate   *bool            `yaml:"run_on_create,omitempty"`
+	Bootstrap     string           `yaml:"bootstrap,omitempty"`
+	Scripts       LifecycleScripts `yaml:"scripts,omitempty"`
 }
 
 const BuiltInCreationProfileDev = "dev"
@@ -62,6 +76,7 @@ type Config struct {
 	OnDestroy              string                     `yaml:"on_destroy"`
 	AutoDeleteBranch       *bool                      `yaml:"auto_delete_branch,omitempty"`
 	Aliases                map[string]string          `yaml:"aliases,omitempty"`
+	Scripts                map[string]ScriptDef       `yaml:"scripts,omitempty"`
 	DefaultCreationProfile string                     `yaml:"default_creation_profile,omitempty"`
 	CreationProfiles       map[string]CreationProfile `yaml:"creation_profiles,omitempty"`
 	Theme                  *Theme                     `yaml:"theme,omitempty"`
@@ -293,6 +308,16 @@ func merge(global, local Config) Config {
 		}
 		for k, v := range local.Aliases {
 			out.Aliases[k] = v
+		}
+	}
+
+	// Scripts: local overrides global per-key
+	if len(local.Scripts) > 0 {
+		if out.Scripts == nil {
+			out.Scripts = make(map[string]ScriptDef)
+		}
+		for k, v := range local.Scripts {
+			out.Scripts[k] = v
 		}
 	}
 

@@ -380,6 +380,7 @@ func (tc *toolContext) handleGetConfig(_ context.Context, req mcp.CallToolReques
 		"on_destroy":               cfg.OnDestroy,
 		"auto_delete_branch":       cfg.ShouldDeleteBranch(),
 		"aliases":                  cfg.Aliases,
+		"scripts":                  cfg.Scripts,
 		"default_creation_profile": cfg.DefaultCreationProfile,
 		"creation_profiles":        cfg.CreationProfiles,
 		"notifications":            notifInfo,

@@ -27,12 +27,18 @@ func CreateWorktree(repoRoot string, cfg config.Config, branch, base string, opt
 	}
 
 	wtPath = cfg.WorktreePath(repoRoot, branch)
+	if err := config.RunProfileScripts(cfg, repoRoot, profile, config.LifecycleBeforeCreate, branch, wtPath, repoRoot); err != nil {
+		return "", "", err
+	}
 
 	if err := worktree.Add(repoRoot, wtPath, branch, true, base); err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w", err)
 	}
 
 	if !profile.ShouldCreateSession() {
+		if err := config.RunProfileScripts(cfg, repoRoot, profile, config.LifecycleAfterCreate, branch, wtPath, wtPath); err != nil {
+			return wtPath, "", fmt.Errorf("worktree created but after_create scripts failed: %w", err)
+		}
 		return wtPath, "", nil
 	}
 	if sessName, err = createSessionForProfile(repoRoot, cfg, profile, branch, wtPath); err != nil {
@@ -70,6 +76,9 @@ func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, source workt
 	localBranch := source.Branch
 
 	wtPath = cfg.WorktreePath(repoRoot, localBranch)
+	if err := config.RunProfileScripts(cfg, repoRoot, profile, config.LifecycleBeforeCreate, localBranch, wtPath, repoRoot); err != nil {
+		return "", "", err
+	}
 
 	switch source.Kind {
 	case worktree.BranchSourceOrigin:
@@ -91,6 +100,9 @@ func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, source workt
 	}
 
 	if !profile.ShouldCreateSession() {
+		if err := config.RunProfileScripts(cfg, repoRoot, profile, config.LifecycleAfterCreate, localBranch, wtPath, wtPath); err != nil {
+			return wtPath, "", fmt.Errorf("worktree created but after_create scripts failed: %w", err)
+		}
 		return wtPath, "", nil
 	}
 	if sessName, err = createSessionForProfile(repoRoot, cfg, profile, localBranch, wtPath); err != nil {
@@ -121,6 +133,9 @@ func createSessionForProfile(repoRoot string, cfg config.Config, profile config.
 			return sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
 		}
 	}
+	if err := config.RunProfileScriptsInTmux(cfg, repoRoot, profile, config.LifecycleAfterCreate, branch, wtPath, sessName); err != nil {
+		return sessName, fmt.Errorf("worktree and session created but after_create scripts failed: %w", err)
+	}
 	if profile.Bootstrap != "" {
 		if err := tmux.SendKeys(sessName, expandBootstrap(profile.Bootstrap, branch, wtPath)); err != nil {
 			return sessName, fmt.Errorf("worktree and session created but bootstrap failed: %w", err)
@@ -139,12 +154,22 @@ func expandBootstrap(command, branch, wtPath string) string {
 
 // DeleteWorktreeOpts controls delete behavior.
 type DeleteWorktreeOpts struct {
-	DeleteBranch bool
+	DeleteBranch    bool
+	CreationProfile string
 }
 
 // DeleteWorktree removes a worktree, optionally deletes the branch, and kills the tmux session.
 // It does NOT handle "deleting self" tmux switching — TUI callers handle that separately.
 func DeleteWorktree(repoRoot string, cfg config.Config, entry state.Entry, opts DeleteWorktreeOpts) error {
+	profile, _, err := cfg.ResolveCreationProfile(opts.CreationProfile)
+	if err != nil {
+		return err
+	}
+
+	if err := config.RunProfileScripts(cfg, repoRoot, profile, config.LifecycleBeforeDestroy, entry.BranchShort, entry.Worktree.Path, entry.Worktree.Path); err != nil {
+		return err
+	}
+
 	// Run on_destroy hook
 	if err := config.RunHook(cfg.OnDestroy, entry.BranchShort, entry.Worktree.Path); err != nil {
 		return fmt.Errorf("on_destroy hook failed: %w", err)
@@ -166,6 +191,10 @@ func DeleteWorktree(repoRoot string, cfg config.Config, entry state.Entry, opts 
 		if err := worktree.DeleteBranch(repoRoot, entry.BranchShort); err != nil {
 			return fmt.Errorf("worktree removed but branch delete failed: %w", err)
 		}
+	}
+
+	if err := config.RunProfileScripts(cfg, repoRoot, profile, config.LifecycleAfterDestroy, entry.BranchShort, entry.Worktree.Path, repoRoot); err != nil {
+		return fmt.Errorf("after_destroy scripts failed: %w", err)
 	}
 
 	return nil

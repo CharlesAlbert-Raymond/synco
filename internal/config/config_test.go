@@ -1,6 +1,11 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestMerge(t *testing.T) {
 	trueVal := true
@@ -10,6 +15,10 @@ func TestMerge(t *testing.T) {
 		OnCreate:               "npm install",
 		DefaultCreationProfile: "dev",
 		Aliases:                map[string]string{"main": "trunk"},
+		Scripts: map[string]ScriptDef{
+			"setup":  {Path: "global-setup.sh"},
+			"global": {Path: "global.sh"},
+		},
 		CreationProfiles: map[string]CreationProfile{
 			"inspect": {CreateSession: &falseVal, RunOnCreate: &falseVal},
 		},
@@ -18,8 +27,12 @@ func TestMerge(t *testing.T) {
 		WorktreeDir:      ".worktrees",
 		AutoDeleteBranch: &trueVal,
 		Aliases:          map[string]string{"dev": "development"},
+		Scripts: map[string]ScriptDef{
+			"setup": {Path: "local-setup.sh"},
+			"seed":  {Path: "seed.sh"},
+		},
 		CreationProfiles: map[string]CreationProfile{
-			"agent": {Bootstrap: "claude {{branch}}"},
+			"agent": {Bootstrap: "claude {{branch}}", Scripts: LifecycleScripts{AfterCreate: []string{"seed"}}},
 		},
 	}
 
@@ -40,12 +53,112 @@ func TestMerge(t *testing.T) {
 	if got.Aliases["dev"] != "development" {
 		t.Error("local alias 'dev' should be merged in")
 	}
+	if got.Scripts["global"].Path != "global.sh" {
+		t.Error("global script should be preserved")
+	}
+	if got.Scripts["setup"].Path != "local-setup.sh" {
+		t.Error("local script should override global script by name")
+	}
+	if got.Scripts["seed"].Path != "seed.sh" {
+		t.Error("local script should be merged in")
+	}
 	if _, ok := got.CreationProfiles["inspect"]; !ok {
 		t.Error("global creation profile 'inspect' should be preserved")
 	}
 	if got.CreationProfiles["agent"].Bootstrap != "claude {{branch}}" {
 		t.Error("local creation profile 'agent' should be merged in")
 	}
+	if got.CreationProfiles["agent"].Scripts.AfterCreate[0] != "seed" {
+		t.Error("profile lifecycle script list should be parsed and merged")
+	}
+}
+
+func TestLoadFileParsesScriptRegistryAndProfileLifecycleScripts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".synco.yaml")
+	if err := os.WriteFile(path, []byte(`scripts:
+  install_deps:
+    path: .synco/scripts/install_deps.sh
+creation_profiles:
+  agent:
+    scripts:
+      before_create:
+        - install_deps
+      after_destroy: []
+`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadFile(path)
+	if err != nil {
+		t.Fatalf("loadFile returned error: %v", err)
+	}
+	if cfg.Scripts["install_deps"].Path != ".synco/scripts/install_deps.sh" {
+		t.Fatalf("script path not parsed: %#v", cfg.Scripts["install_deps"])
+	}
+	if got := cfg.CreationProfiles["agent"].Scripts.BeforeCreate; len(got) != 1 || got[0] != "install_deps" {
+		t.Fatalf("before_create scripts = %v, want [install_deps]", got)
+	}
+}
+
+func TestRunProfileScriptsUsesBashEnvWorkdirAndOrder(t *testing.T) {
+	repoRoot := t.TempDir()
+	worktreePath := filepath.Join(repoRoot, ".worktrees", "feature")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	logPath := filepath.Join(repoRoot, "script.log")
+	writeScript := func(name, marker string) {
+		t.Helper()
+		path := filepath.Join(repoRoot, name)
+		body := "printf '" + marker + ":%s:%s:%s\\n' \"$PWD\" \"$SYNCO_BRANCH\" \"$SYNCO_WORKTREE_PATH\" >> " + testShellQuote(logPath) + "\n"
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatalf("write script: %v", err)
+		}
+	}
+	writeScript("one.sh", "one")
+	writeScript("two.sh", "two")
+
+	cfg := Config{Scripts: map[string]ScriptDef{
+		"one": {Path: "one.sh"},
+		"two": {Path: "two.sh"},
+	}}
+	profile := CreationProfile{Scripts: LifecycleScripts{AfterCreate: []string{"one", "two"}}}
+	if err := RunProfileScripts(cfg, repoRoot, profile, LifecycleAfterCreate, "feature/test", worktreePath, worktreePath); err != nil {
+		t.Fatalf("RunProfileScripts returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	worktreePWD := realPath(t, worktreePath)
+	want := "one:" + worktreePWD + ":feature/test:" + worktreePath + "\n" +
+		"two:" + worktreePWD + ":feature/test:" + worktreePath + "\n"
+	if string(data) != want {
+		t.Fatalf("log = %q, want %q", string(data), want)
+	}
+}
+
+func TestRunProfileScriptsReportsMissingReferenceWithEvent(t *testing.T) {
+	profile := CreationProfile{Scripts: LifecycleScripts{BeforeCreate: []string{"missing"}}}
+	err := RunProfileScripts(Config{}, t.TempDir(), profile, LifecycleBeforeCreate, "branch", "/tmp/wt", "/tmp")
+	if err == nil || !strings.Contains(err.Error(), "missing") || !strings.Contains(err.Error(), LifecycleBeforeCreate) {
+		t.Fatalf("error = %v, want script name and lifecycle event", err)
+	}
+}
+
+func testShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func realPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve path %s: %v", path, err)
+	}
+	return resolved
 }
 
 func TestMergeEmptyLocal(t *testing.T) {
