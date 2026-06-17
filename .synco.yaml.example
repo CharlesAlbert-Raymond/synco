@@ -13,6 +13,21 @@ on_create: "./scripts/setup-worktree.sh"
 # Receives SYNCO_BRANCH and SYNCO_WORKTREE_PATH as env vars.
 on_destroy: "./scripts/cleanup-worktree.sh"
 
+# Worktree creation profiles control how much setup runs for each new worktree.
+# If omitted, creation uses the built-in dev behavior: create a tmux session and run on_create.
+# default_creation_profile: dev
+# creation_profiles:
+#   inspect:
+#     create_session: false
+#     run_on_create: false
+#   dev:
+#     create_session: true
+#     run_on_create: true
+#   agent:
+#     create_session: true
+#     run_on_create: true
+#     bootstrap: 'claude --dangerously-skip-permissions "Work on {{branch}} in {{worktree_path}}"'
+
 # Automatically delete the git branch when removing a worktree (default: false).
 # Can be toggled per-deletion in the confirm dialog with 'b'.
 auto_delete_branch: false

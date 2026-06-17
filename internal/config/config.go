@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -12,8 +13,8 @@ import (
 // Pane defines a single pane in a layout.
 type Pane struct {
 	Command string `yaml:"command"`
-	Split   string `yaml:"split,omitempty"`   // "horizontal" or "vertical"
-	Size    string `yaml:"size,omitempty"`     // e.g. "30%"
+	Split   string `yaml:"split,omitempty"` // "horizontal" or "vertical"
+	Size    string `yaml:"size,omitempty"`  // e.g. "30%"
 }
 
 // Layout defines a named window layout with multiple panes.
@@ -43,19 +44,93 @@ type ProjectDef struct {
 	Repos []string `yaml:"repos"`
 }
 
+// CreationProfile controls which lifecycle steps run when creating a worktree.
+type CreationProfile struct {
+	CreateSession *bool  `yaml:"create_session,omitempty"`
+	RunOnCreate   *bool  `yaml:"run_on_create,omitempty"`
+	Bootstrap     string `yaml:"bootstrap,omitempty"`
+}
+
+const BuiltInCreationProfileDev = "dev"
+
 // Config holds the merged synco configuration.
 type Config struct {
-	WorktreeDir      string            `yaml:"worktree_dir"`
-	SidebarWidth     string            `yaml:"sidebar_width,omitempty"`
-	ProjectName      string            `yaml:"project_name,omitempty"`
-	OnCreate         string            `yaml:"on_create"`
-	OnDestroy        string            `yaml:"on_destroy"`
-	AutoDeleteBranch *bool             `yaml:"auto_delete_branch,omitempty"`
-	Aliases          map[string]string `yaml:"aliases,omitempty"`
-	Theme            *Theme            `yaml:"theme,omitempty"`
-	Layouts          map[string]Layout `yaml:"layouts,omitempty"`
-	Notifications    *Notifications    `yaml:"notifications,omitempty"`
-	Projects         map[string]ProjectDef `yaml:"projects,omitempty"`
+	WorktreeDir            string                     `yaml:"worktree_dir"`
+	SidebarWidth           string                     `yaml:"sidebar_width,omitempty"`
+	ProjectName            string                     `yaml:"project_name,omitempty"`
+	OnCreate               string                     `yaml:"on_create"`
+	OnDestroy              string                     `yaml:"on_destroy"`
+	AutoDeleteBranch       *bool                      `yaml:"auto_delete_branch,omitempty"`
+	Aliases                map[string]string          `yaml:"aliases,omitempty"`
+	DefaultCreationProfile string                     `yaml:"default_creation_profile,omitempty"`
+	CreationProfiles       map[string]CreationProfile `yaml:"creation_profiles,omitempty"`
+	Theme                  *Theme                     `yaml:"theme,omitempty"`
+	Layouts                map[string]Layout          `yaml:"layouts,omitempty"`
+	Notifications          *Notifications             `yaml:"notifications,omitempty"`
+	Projects               map[string]ProjectDef      `yaml:"projects,omitempty"`
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+// DefaultCreationProfile returns the built-in development creation behavior.
+func DefaultCreationProfile() CreationProfile {
+	return CreationProfile{CreateSession: boolPtr(true), RunOnCreate: boolPtr(true)}
+}
+
+// ShouldCreateSession reports whether this profile creates a tmux session.
+func (p CreationProfile) ShouldCreateSession() bool {
+	if p.CreateSession == nil {
+		return true
+	}
+	return *p.CreateSession
+}
+
+// ShouldRunOnCreate reports whether this profile runs the configured on_create hook.
+func (p CreationProfile) ShouldRunOnCreate() bool {
+	if p.RunOnCreate == nil {
+		return true
+	}
+	return *p.RunOnCreate
+}
+
+// ResolveCreationProfile resolves a requested profile name to concrete lifecycle behavior.
+func (c Config) ResolveCreationProfile(name string) (CreationProfile, string, error) {
+	profileName := strings.TrimSpace(name)
+	if profileName == "" {
+		profileName = strings.TrimSpace(c.DefaultCreationProfile)
+	}
+	if profileName == "" {
+		return DefaultCreationProfile(), BuiltInCreationProfileDev, nil
+	}
+	if profile, ok := c.CreationProfiles[profileName]; ok {
+		return profile, profileName, nil
+	}
+	if profileName == BuiltInCreationProfileDev {
+		return DefaultCreationProfile(), profileName, nil
+	}
+	return CreationProfile{}, "", fmt.Errorf("unknown creation profile %q", profileName)
+}
+
+// CreationProfileNames returns selectable profile names, including the built-in dev profile.
+func (c Config) CreationProfileNames() []string {
+	names := make([]string, 0, len(c.CreationProfiles)+1)
+	seen := map[string]bool{BuiltInCreationProfileDev: true}
+	names = append(names, BuiltInCreationProfileDev)
+	for name := range c.CreationProfiles {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	defaultName := strings.TrimSpace(c.DefaultCreationProfile)
+	if defaultName != "" && !seen[defaultName] {
+		names = append(names, defaultName)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // DefaultLayout returns the "default" layout, or nil if none is configured.
@@ -207,6 +282,9 @@ func merge(global, local Config) Config {
 	if local.AutoDeleteBranch != nil {
 		out.AutoDeleteBranch = local.AutoDeleteBranch
 	}
+	if local.DefaultCreationProfile != "" {
+		out.DefaultCreationProfile = local.DefaultCreationProfile
+	}
 
 	// Merge aliases: local overrides global per-key
 	if len(local.Aliases) > 0 {
@@ -235,6 +313,16 @@ func merge(global, local Config) Config {
 		}
 		for k, v := range local.Projects {
 			out.Projects[k] = v
+		}
+	}
+
+	// Creation profiles: local overrides global per-key
+	if len(local.CreationProfiles) > 0 {
+		if out.CreationProfiles == nil {
+			out.CreationProfiles = make(map[string]CreationProfile)
+		}
+		for k, v := range local.CreationProfiles {
+			out.CreationProfiles[k] = v
 		}
 	}
 

@@ -66,6 +66,7 @@ func (m configViewModel) View() string {
 
 	renderField("on_create", m.config.OnCreate)
 	renderField("on_destroy", m.config.OnDestroy)
+	renderField("default_creation_profile", m.config.DefaultCreationProfile)
 
 	deleteBranchVal := "false"
 	if m.config.ShouldDeleteBranch() {
@@ -80,6 +81,21 @@ func (m configViewModel) View() string {
 		for branch, alias := range m.config.Aliases {
 			b.WriteString(labelStyle.Render("  " + branch + ":"))
 			b.WriteString(valueStyle.Render(alias))
+			b.WriteString("\n")
+		}
+	}
+
+	if len(m.config.CreationProfiles) > 0 {
+		b.WriteString("\n")
+		b.WriteString(headerStyle.Render("Creation Profiles"))
+		b.WriteString("\n")
+		for name, profile := range m.config.CreationProfiles {
+			detail := fmt.Sprintf("session=%t, on_create=%t", profile.ShouldCreateSession(), profile.ShouldRunOnCreate())
+			if profile.Bootstrap != "" {
+				detail += ", bootstrap=true"
+			}
+			b.WriteString(labelStyle.Render("  " + name + ":"))
+			b.WriteString(valueStyle.Render(detail))
 			b.WriteString("\n")
 		}
 	}

@@ -4,15 +4,23 @@ import "testing"
 
 func TestMerge(t *testing.T) {
 	trueVal := true
+	falseVal := false
 	global := Config{
-		WorktreeDir: ".wt",
-		OnCreate:    "npm install",
-		Aliases:     map[string]string{"main": "trunk"},
+		WorktreeDir:            ".wt",
+		OnCreate:               "npm install",
+		DefaultCreationProfile: "dev",
+		Aliases:                map[string]string{"main": "trunk"},
+		CreationProfiles: map[string]CreationProfile{
+			"inspect": {CreateSession: &falseVal, RunOnCreate: &falseVal},
+		},
 	}
 	local := Config{
 		WorktreeDir:      ".worktrees",
 		AutoDeleteBranch: &trueVal,
 		Aliases:          map[string]string{"dev": "development"},
+		CreationProfiles: map[string]CreationProfile{
+			"agent": {Bootstrap: "claude {{branch}}"},
+		},
 	}
 
 	got := merge(global, local)
@@ -31,6 +39,12 @@ func TestMerge(t *testing.T) {
 	}
 	if got.Aliases["dev"] != "development" {
 		t.Error("local alias 'dev' should be merged in")
+	}
+	if _, ok := got.CreationProfiles["inspect"]; !ok {
+		t.Error("global creation profile 'inspect' should be preserved")
+	}
+	if got.CreationProfiles["agent"].Bootstrap != "claude {{branch}}" {
+		t.Error("local creation profile 'agent' should be merged in")
 	}
 }
 
@@ -217,5 +231,57 @@ func TestAliasFor(t *testing.T) {
 	c2 := Config{}
 	if got := c2.AliasFor("main"); got != "" {
 		t.Errorf("AliasFor with nil aliases = %q, want empty", got)
+	}
+}
+
+func TestResolveCreationProfileDefaultsToBuiltInDev(t *testing.T) {
+	profile, name, err := (Config{}).ResolveCreationProfile("")
+	if err != nil {
+		t.Fatalf("ResolveCreationProfile returned error: %v", err)
+	}
+	if name != BuiltInCreationProfileDev {
+		t.Fatalf("profile name = %q, want %q", name, BuiltInCreationProfileDev)
+	}
+	if !profile.ShouldCreateSession() || !profile.ShouldRunOnCreate() {
+		t.Fatal("built-in dev profile should create a session and run on_create")
+	}
+}
+
+func TestResolveCreationProfileUsesConfiguredDefault(t *testing.T) {
+	falseVal := false
+	c := Config{
+		DefaultCreationProfile: "inspect",
+		CreationProfiles: map[string]CreationProfile{
+			"inspect": {CreateSession: &falseVal, RunOnCreate: &falseVal},
+		},
+	}
+
+	profile, name, err := c.ResolveCreationProfile("")
+	if err != nil {
+		t.Fatalf("ResolveCreationProfile returned error: %v", err)
+	}
+	if name != "inspect" {
+		t.Fatalf("profile name = %q, want inspect", name)
+	}
+	if profile.ShouldCreateSession() || profile.ShouldRunOnCreate() {
+		t.Fatal("inspect profile should skip session and on_create")
+	}
+}
+
+func TestResolveCreationProfileRejectsUnknown(t *testing.T) {
+	_, _, err := (Config{}).ResolveCreationProfile("missing")
+	if err == nil {
+		t.Fatal("expected unknown profile error")
+	}
+}
+
+func TestCreationProfileNamesIncludesUnknownConfiguredDefault(t *testing.T) {
+	c := Config{DefaultCreationProfile: "missing"}
+	names := c.CreationProfileNames()
+	if len(names) != 2 {
+		t.Fatalf("CreationProfileNames length = %d, want 2", len(names))
+	}
+	if names[0] != BuiltInCreationProfileDev || names[1] != "missing" {
+		t.Fatalf("CreationProfileNames = %v, want [dev missing]", names)
 	}
 }

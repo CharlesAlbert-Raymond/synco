@@ -30,6 +30,7 @@ var createWorktreeTool = mcp.NewTool("synco_create_worktree",
 	mcp.WithString("branch", mcp.Required(), mcp.Description("Branch name to create, or an existing local/remote branch when existing_branch is true (e.g. 'feature/auth-refactor' or 'origin/feature/auth-refactor').")),
 	mcp.WithString("base", mcp.Description("Base branch or commit to branch from. Defaults to HEAD. Ignored when existing_branch is true.")),
 	mcp.WithBoolean("existing_branch", mcp.Description("If true, use an existing local or remote branch instead of creating a new one. Remote branches create a local tracking branch; use the returned branch value for follow-up tool calls.")),
+	mcp.WithString("creation_profile", mcp.Description("Named creation profile to use. Defaults to default_creation_profile, or the built-in dev behavior.")),
 	mcp.WithString("title", mcp.Description("Optional human-readable title for the worktree card.")),
 )
 
@@ -203,13 +204,19 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 	var wtPath, sessName string
 	resultBranch := branch
 	existing, _ := boolArg(req, "existing_branch")
+	profileName := stringArg(req, "creation_profile")
+	_, resolvedProfile, err := cfg.ResolveCreationProfile(profileName)
+	if err != nil {
+		return errResult("%v", err)
+	}
+	createOpts := orchestrate.CreateWorktreeOpts{CreationProfile: profileName}
 	if existing {
 		source := orchestrate.BranchSourceFromName(tc.repoRoot, branch)
 		resultBranch = source.Branch
-		wtPath, sessName, err = orchestrate.CreateWorktreeFromExisting(tc.repoRoot, cfg, source)
+		wtPath, sessName, err = orchestrate.CreateWorktreeFromExisting(tc.repoRoot, cfg, source, createOpts)
 	} else {
 		base := stringArg(req, "base")
-		wtPath, sessName, err = orchestrate.CreateWorktree(tc.repoRoot, cfg, branch, base)
+		wtPath, sessName, err = orchestrate.CreateWorktree(tc.repoRoot, cfg, branch, base, createOpts)
 	}
 	if err != nil {
 		return errResult("%v", err)
@@ -225,12 +232,13 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 		}
 	}
 
-	return textResult(map[string]string{
-		"status":        "created",
-		"branch":        resultBranch,
-		"source_branch": branch,
-		"path":          wtPath,
-		"session_name":  sessName,
+	return textResult(map[string]any{
+		"status":           "created",
+		"branch":           resultBranch,
+		"source_branch":    branch,
+		"path":             wtPath,
+		"session_name":     sessName,
+		"creation_profile": resolvedProfile,
 	})
 }
 
@@ -367,14 +375,16 @@ func (tc *toolContext) handleGetConfig(_ context.Context, req mcp.CallToolReques
 	}
 
 	return textResult(map[string]any{
-		"worktree_dir":       cfg.WorktreeDir,
-		"on_create":          cfg.OnCreate,
-		"on_destroy":         cfg.OnDestroy,
-		"auto_delete_branch": cfg.ShouldDeleteBranch(),
-		"aliases":            cfg.Aliases,
-		"notifications":      notifInfo,
-		"global_config_path": config.GlobalConfigPath(),
-		"local_config_path":  tc.repoRoot + "/.synco.yaml",
+		"worktree_dir":             cfg.WorktreeDir,
+		"on_create":                cfg.OnCreate,
+		"on_destroy":               cfg.OnDestroy,
+		"auto_delete_branch":       cfg.ShouldDeleteBranch(),
+		"aliases":                  cfg.Aliases,
+		"default_creation_profile": cfg.DefaultCreationProfile,
+		"creation_profiles":        cfg.CreationProfiles,
+		"notifications":            notifInfo,
+		"global_config_path":       config.GlobalConfigPath(),
+		"local_config_path":        tc.repoRoot + "/.synco.yaml",
 	})
 }
 
