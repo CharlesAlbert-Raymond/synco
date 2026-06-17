@@ -1,6 +1,6 @@
 # Add profile lifecycle scripts
 
-Status: ready-for-agent
+Status: ready-for-human
 Priority: High
 Type: Feature
 
@@ -107,3 +107,5 @@ Recommended ordering:
 This overlaps conceptually with the Command Center backlog, but this ticket is intentionally narrower: lifecycle automation owned by creation profiles, not a general command/action system.
 
 ## Comments
+
+- Archived after implementation commit `74f9d09 Add profile lifecycle scripts`.
