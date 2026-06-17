@@ -11,6 +11,10 @@ auto_delete_branch: true
 default_creation_profile: dev
 
 creation_profiles:
+  dev:
+    create_session: true
+    run_on_create: true
+
   inspect:
     create_session: true
     run_on_create: false
