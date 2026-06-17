@@ -7,8 +7,31 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/charles-albert-raymond/synco/internal/config"
 	"github.com/charles-albert-raymond/synco/internal/worktree"
 )
+
+func TestCreateModelCyclesCreationProfiles(t *testing.T) {
+	falseVal := false
+	m := newCreateModel(t.TempDir(), config.Config{
+		CreationProfiles: map[string]config.CreationProfile{
+			"inspect": {CreateSession: &falseVal, RunOnCreate: &falseVal},
+		},
+	})
+
+	if got := m.selectedProfileName(); got != config.BuiltInCreationProfileDev {
+		t.Fatalf("default selected profile = %q, want dev", got)
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	if got := updated.selectedProfileName(); got != "inspect" {
+		t.Fatalf("cycled selected profile = %q, want inspect", got)
+	}
+	if !strings.Contains(updated.View(), "inspect") {
+		t.Fatalf("view should show selected profile: %q", updated.View())
+	}
+}
 
 func TestFetchBranchesKeepsLocalAndOriginWhenLocalExists(t *testing.T) {
 	remote := filepath.Join(t.TempDir(), "remote.git")

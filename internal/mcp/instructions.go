@@ -31,5 +31,5 @@ This is the most common pattern: the user describes a task, you create a worktre
 - **Always list before creating.** Call synco_list_worktrees first to avoid duplicates.
 - **Check session output after sending commands.** Don't assume success — verify with synco_session_output.
 - **The main worktree cannot be deleted.** This is enforced by the tool.
-- **on_create hooks run automatically.** When a worktree is created, configured hooks (e.g. dependency install) run. Check output to confirm completion before sending further commands.
+- **Creation profiles control setup.** synco_create_worktree accepts creation_profile. If omitted, Syncopate uses default_creation_profile or the built-in dev behavior. Some profiles may skip tmux sessions or on_create hooks, so check the returned session_name before sending keys.
 `

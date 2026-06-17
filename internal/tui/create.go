@@ -40,6 +40,9 @@ type createModel struct {
 	fetched         bool // true once branches have been loaded
 	existFocusIdx   int  // 0=filter, 1=title (existing mode)
 
+	profileNames []string
+	profileIdx   int
+
 	err      string
 	repoRoot string
 	config   config.Config
@@ -94,6 +97,9 @@ func newCreateModel(repoRoot string, cfg config.Config) createModel {
 	eti.PromptStyle = inputLabelStyle
 	eti.TextStyle = lipgloss.NewStyle().Foreground(colorText)
 
+	profileNames := cfg.CreationProfileNames()
+	profileIdx := selectedProfileIndex(profileNames, cfg.DefaultCreationProfile)
+
 	return createModel{
 		mode:            modeNewBranch,
 		branchInput:     bi,
@@ -101,9 +107,23 @@ func newCreateModel(repoRoot string, cfg config.Config) createModel {
 		baseInput:       base,
 		filterInput:     fi,
 		existTitleInput: eti,
+		profileNames:    profileNames,
+		profileIdx:      profileIdx,
 		repoRoot:        repoRoot,
 		config:          cfg,
 	}
+}
+
+func selectedProfileIndex(names []string, defaultName string) int {
+	if defaultName == "" {
+		defaultName = config.BuiltInCreationProfileDev
+	}
+	for i, name := range names {
+		if name == defaultName {
+			return i
+		}
+	}
+	return 0
 }
 
 // fetchBranchesCmd fetches from origin then lists available local and origin branch sources.
@@ -203,6 +223,10 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 		case "enter":
 			return m.handleSubmit()
 
+		case "ctrl+o":
+			m.cycleProfile()
+			return m, nil
+
 		case "tab", "shift+tab":
 			if m.mode == modeNewBranch {
 				return m.toggleNewBranchFocus()
@@ -263,7 +287,7 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 		}
 		title := strings.TrimSpace(m.titleInput.Value())
 		base := strings.TrimSpace(m.baseInput.Value())
-		if _, _, err := orchestrate.CreateWorktree(m.repoRoot, m.config, branch, base); err != nil {
+		if _, _, err := orchestrate.CreateWorktree(m.repoRoot, m.config, branch, base, orchestrate.CreateWorktreeOpts{CreationProfile: m.selectedProfileName()}); err != nil {
 			m.err = fmt.Sprintf("Failed: %v", err)
 			return m, nil
 		}
@@ -277,11 +301,25 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 	}
 	source := m.filtered[m.branchIdx]
 	title := strings.TrimSpace(m.existTitleInput.Value())
-	if _, _, err := orchestrate.CreateWorktreeFromExisting(m.repoRoot, m.config, source); err != nil {
+	if _, _, err := orchestrate.CreateWorktreeFromExisting(m.repoRoot, m.config, source, orchestrate.CreateWorktreeOpts{CreationProfile: m.selectedProfileName()}); err != nil {
 		m.err = fmt.Sprintf("Failed: %v", err)
 		return m, nil
 	}
 	return m, func() tea.Msg { return createDoneMsg{branch: source.Branch, title: title} }
+}
+
+func (m *createModel) cycleProfile() {
+	if len(m.profileNames) == 0 {
+		return
+	}
+	m.profileIdx = (m.profileIdx + 1) % len(m.profileNames)
+}
+
+func (m createModel) selectedProfileName() string {
+	if len(m.profileNames) == 0 || m.profileIdx < 0 || m.profileIdx >= len(m.profileNames) {
+		return ""
+	}
+	return m.profileNames[m.profileIdx]
 }
 
 func (m createModel) toggleNewBranchFocus() (createModel, tea.Cmd) {
@@ -402,9 +440,9 @@ func (m createModel) View() string {
 
 	b.WriteString("\n")
 	if m.mode == modeNewBranch {
-		b.WriteString(helpStyle.Render(" enter submit • tab switch field • ctrl+e existing • esc cancel"))
+		b.WriteString(helpStyle.Render(" enter submit • tab switch field • ctrl+o profile • ctrl+e existing • esc cancel"))
 	} else {
-		b.WriteString(helpStyle.Render(" enter submit • tab title • ↑/↓ select • ctrl+e new branch • esc cancel"))
+		b.WriteString(helpStyle.Render(" enter submit • tab title • ctrl+o profile • ↑/↓ select • ctrl+e new branch • esc cancel"))
 	}
 
 	return borderStyle.Render(b.String())
@@ -424,6 +462,8 @@ func (m createModel) viewNewBranch(b *strings.Builder) {
 	b.WriteString(inputLabelStyle.Render("Base branch (optional):"))
 	b.WriteString("\n")
 	b.WriteString(m.baseInput.View())
+	b.WriteString("\n\n")
+	m.viewProfile(b)
 }
 
 func (m createModel) viewExistingBranch(b *strings.Builder) {
@@ -435,6 +475,8 @@ func (m createModel) viewExistingBranch(b *strings.Builder) {
 	b.WriteString(inputLabelStyle.Render("Title (optional):"))
 	b.WriteString("\n")
 	b.WriteString(m.existTitleInput.View())
+	b.WriteString("\n\n")
+	m.viewProfile(b)
 	b.WriteString("\n\n")
 
 	if m.fetching {
@@ -492,4 +534,10 @@ func (m createModel) viewExistingBranch(b *strings.Builder) {
 
 	b.WriteString("\n")
 	b.WriteString(subtitleStyle.Render(fmt.Sprintf("  %d/%d branches", len(m.filtered), len(m.allSources))))
+}
+
+func (m createModel) viewProfile(b *strings.Builder) {
+	b.WriteString(inputLabelStyle.Render("Profile:"))
+	b.WriteString(" ")
+	b.WriteString(branchStyle.Render(m.selectedProfileName()))
 }

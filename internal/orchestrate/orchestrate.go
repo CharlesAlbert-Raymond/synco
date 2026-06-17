@@ -10,25 +10,32 @@ import (
 	"github.com/charles-albert-raymond/synco/internal/worktree"
 )
 
-// CreateWorktree creates a git worktree, a tmux session, and runs the on_create hook.
-func CreateWorktree(repoRoot string, cfg config.Config, branch, base string) (wtPath, sessName string, err error) {
+// CreateWorktreeOpts controls create behavior.
+type CreateWorktreeOpts struct {
+	CreationProfile string
+}
+
+// CreateWorktree creates a git worktree and applies the selected creation profile.
+func CreateWorktree(repoRoot string, cfg config.Config, branch, base string, opts CreateWorktreeOpts) (wtPath, sessName string, err error) {
+	profile, _, err := cfg.ResolveCreationProfile(opts.CreationProfile)
+	if err != nil {
+		return "", "", err
+	}
+	if err := validateCreationProfile(profile); err != nil {
+		return "", "", err
+	}
+
 	wtPath = cfg.WorktreePath(repoRoot, branch)
 
 	if err := worktree.Add(repoRoot, wtPath, branch, true, base); err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	project := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
-	sessName = tmux.SessionNameFor(project, branch)
-	sessionExists := tmux.SessionExists(sessName)
-	if !sessionExists {
-		if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
-			return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
-		}
-
-		if err := config.RunHookInTmux(sessName, cfg.OnCreate, branch, wtPath); err != nil {
-			return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
-		}
+	if !profile.ShouldCreateSession() {
+		return wtPath, "", nil
+	}
+	if sessName, err = createSessionForProfile(repoRoot, cfg, profile, branch, wtPath); err != nil {
+		return wtPath, sessName, err
 	}
 
 	return wtPath, sessName, nil
@@ -50,7 +57,15 @@ func BranchSourceFromName(repoRoot, branch string) worktree.BranchSource {
 
 // CreateWorktreeFromExisting creates a worktree from an existing local or origin branch source.
 // Origin sources create a local tracking branch when one does not already exist.
-func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, source worktree.BranchSource) (wtPath, sessName string, err error) {
+func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, source worktree.BranchSource, opts CreateWorktreeOpts) (wtPath, sessName string, err error) {
+	profile, _, err := cfg.ResolveCreationProfile(opts.CreationProfile)
+	if err != nil {
+		return "", "", err
+	}
+	if err := validateCreationProfile(profile); err != nil {
+		return "", "", err
+	}
+
 	localBranch := source.Branch
 
 	wtPath = cfg.WorktreePath(repoRoot, localBranch)
@@ -74,20 +89,51 @@ func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, source workt
 		return "", "", fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	project := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
-	sessName = tmux.SessionNameFor(project, localBranch)
-	sessionExists := tmux.SessionExists(sessName)
-	if !sessionExists {
-		if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
-			return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
-		}
-
-		if err := config.RunHookInTmux(sessName, cfg.OnCreate, localBranch, wtPath); err != nil {
-			return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
-		}
+	if !profile.ShouldCreateSession() {
+		return wtPath, "", nil
+	}
+	if sessName, err = createSessionForProfile(repoRoot, cfg, profile, localBranch, wtPath); err != nil {
+		return wtPath, sessName, err
 	}
 
 	return wtPath, sessName, nil
+}
+
+func validateCreationProfile(profile config.CreationProfile) error {
+	if !profile.ShouldCreateSession() && profile.Bootstrap != "" {
+		return fmt.Errorf("creation profile bootstrap requires create_session=true")
+	}
+	return nil
+}
+
+func createSessionForProfile(repoRoot string, cfg config.Config, profile config.CreationProfile, branch, wtPath string) (string, error) {
+	project := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
+	sessName := tmux.SessionNameFor(project, branch)
+	if tmux.SessionExists(sessName) {
+		return sessName, nil
+	}
+	if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
+		return "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
+	}
+	if profile.ShouldRunOnCreate() {
+		if err := config.RunHookInTmux(sessName, cfg.OnCreate, branch, wtPath); err != nil {
+			return sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
+		}
+	}
+	if profile.Bootstrap != "" {
+		if err := tmux.SendKeys(sessName, expandBootstrap(profile.Bootstrap, branch, wtPath)); err != nil {
+			return sessName, fmt.Errorf("worktree and session created but bootstrap failed: %w", err)
+		}
+	}
+	return sessName, nil
+}
+
+func expandBootstrap(command, branch, wtPath string) string {
+	replacer := strings.NewReplacer(
+		"{{branch}}", branch,
+		"{{worktree_path}}", wtPath,
+	)
+	return replacer.Replace(command)
 }
 
 // DeleteWorktreeOpts controls delete behavior.
