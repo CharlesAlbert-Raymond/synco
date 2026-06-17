@@ -173,7 +173,7 @@ func (m listModel) updateFilter(msg tea.KeyMsg, repoRoot string, sidebarMode boo
 		}
 
 		if sidebarMode {
-			if err := tmux.EnsureSidebar(entry.SessionName, repoRoot); err != nil {
+			if err := tmux.EnsureSidebar(entry.SessionName, repoRoot, m.config.SidebarWidth); err != nil {
 				m.message = fmt.Sprintf("Error adding sidebar: %v", err)
 				m.msgStyle = errorStyle
 				return m, nil
@@ -277,7 +277,7 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 			}
 
 			// Ensure the target session has a sidebar pane
-			if err := tmux.EnsureSidebar(entry.SessionName, repoRoot); err != nil {
+			if err := tmux.EnsureSidebar(entry.SessionName, repoRoot, m.config.SidebarWidth); err != nil {
 				m.message = fmt.Sprintf("Error adding sidebar: %v", err)
 				m.msgStyle = errorStyle
 				return m, nil

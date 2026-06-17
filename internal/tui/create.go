@@ -33,12 +33,12 @@ type createModel struct {
 	// Existing branch fields
 	filterInput     textinput.Model
 	existTitleInput textinput.Model
-	allBranches     []string // combined local + remote
-	filtered        []string // branches matching filter
-	branchIdx       int      // cursor in filtered list
-	fetching        bool     // true while git fetch is running
-	fetched         bool     // true once branches have been loaded
-	existFocusIdx   int      // 0=filter, 1=title (existing mode)
+	allSources      []worktree.BranchSource
+	filtered        []worktree.BranchSource
+	branchIdx       int  // cursor in filtered list
+	fetching        bool // true while git fetch is running
+	fetched         bool // true once branches have been loaded
+	existFocusIdx   int  // 0=filter, 1=title (existing mode)
 
 	err      string
 	repoRoot string
@@ -52,8 +52,9 @@ type createDoneMsg struct {
 
 // branchesMsg is sent when branch listing completes.
 type branchesMsg struct {
-	branches []string
-	err      error
+	sources []worktree.BranchSource
+	warning string
+	err     error
 }
 
 func newCreateModel(repoRoot string, cfg config.Config) createModel {
@@ -105,42 +106,53 @@ func newCreateModel(repoRoot string, cfg config.Config) createModel {
 	}
 }
 
-// fetchBranchesCmd fetches from remote then lists all branches.
+// fetchBranchesCmd fetches from origin then lists available local and origin branch sources.
 func fetchBranchesCmd(repoRoot string) tea.Cmd {
 	return func() tea.Msg {
-		// Best-effort fetch; if it fails, we still show local branches
-		_ = worktree.Fetch(repoRoot)
+		var warning string
+		if err := worktree.Fetch(repoRoot); err != nil {
+			warning = fmt.Sprintf("Fetch failed; showing cached branches: %v", err)
+		}
 
 		local, err := worktree.BranchList(repoRoot)
 		if err != nil {
 			return branchesMsg{err: err}
 		}
-		remote, err := worktree.RemoteBranchList(repoRoot)
+		origin, err := worktree.OriginBranchList(repoRoot)
+		if err != nil {
+			return branchesMsg{err: err}
+		}
+		checkedOut, err := worktree.CheckedOutBranches(repoRoot)
 		if err != nil {
 			return branchesMsg{err: err}
 		}
 
-		// Deduplicate: if a local branch exists, skip the remote variant
-		localSet := make(map[string]bool, len(local))
-		for _, b := range local {
-			localSet[b] = true
+		localExists := make(map[string]bool, len(local))
+		for _, branch := range local {
+			localExists[branch] = true
 		}
 
-		combined := make([]string, 0, len(local)+len(remote))
-		combined = append(combined, local...)
-		for _, rb := range remote {
-			// Strip "origin/" prefix for dedup check
-			short := rb
-			if idx := strings.Index(rb, "/"); idx != -1 {
-				short = rb[idx+1:]
+		sources := make([]worktree.BranchSource, 0, len(local)+len(origin))
+		for _, branch := range local {
+			if checkedOut[branch] {
+				continue
 			}
-			if !localSet[short] {
-				combined = append(combined, rb)
+			sources = append(sources, worktree.BranchSource{Kind: worktree.BranchSourceLocal, Branch: branch, LocalExists: true})
+		}
+		for _, branch := range origin {
+			if checkedOut[branch] {
+				continue
 			}
+			sources = append(sources, worktree.BranchSource{Kind: worktree.BranchSourceOrigin, Branch: branch, RemoteRef: "origin/" + branch, LocalExists: localExists[branch]})
 		}
 
-		sort.Strings(combined)
-		return branchesMsg{branches: combined}
+		sort.Slice(sources, func(i, j int) bool {
+			if sources[i].Branch == sources[j].Branch {
+				return sources[i].Kind < sources[j].Kind
+			}
+			return sources[i].Branch < sources[j].Branch
+		})
+		return branchesMsg{sources: sources, warning: warning}
 	}
 }
 
@@ -153,7 +165,8 @@ func (m createModel) Update(msg tea.Msg) (createModel, tea.Cmd) {
 			m.err = fmt.Sprintf("Failed to list branches: %v", msg.err)
 			return m, nil
 		}
-		m.allBranches = msg.branches
+		m.allSources = msg.sources
+		m.err = msg.warning
 		m.applyFilter()
 		return m, nil
 
@@ -262,15 +275,13 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 		m.err = "No branch selected"
 		return m, nil
 	}
-	branch := m.filtered[m.branchIdx]
+	source := m.filtered[m.branchIdx]
 	title := strings.TrimSpace(m.existTitleInput.Value())
-	if _, _, err := orchestrate.CreateWorktreeFromExisting(m.repoRoot, m.config, branch); err != nil {
+	if _, _, err := orchestrate.CreateWorktreeFromExisting(m.repoRoot, m.config, source); err != nil {
 		m.err = fmt.Sprintf("Failed: %v", err)
 		return m, nil
 	}
-	// Strip remote prefix for the local branch used as metadata key
-	localBranch := orchestrate.ExistingBranchLocalName(m.repoRoot, branch)
-	return m, func() tea.Msg { return createDoneMsg{branch: localBranch, title: title} }
+	return m, func() tea.Msg { return createDoneMsg{branch: source.Branch, title: title} }
 }
 
 func (m createModel) toggleNewBranchFocus() (createModel, tea.Cmd) {
@@ -336,12 +347,12 @@ func (m createModel) updateExisting(msg tea.KeyMsg) (createModel, tea.Cmd) {
 func (m *createModel) applyFilter() {
 	query := strings.ToLower(strings.TrimSpace(m.filterInput.Value()))
 	if query == "" {
-		m.filtered = m.allBranches
+		m.filtered = m.allSources
 	} else {
 		m.filtered = m.filtered[:0]
-		for _, b := range m.allBranches {
-			if fuzzyMatch(strings.ToLower(b), query) {
-				m.filtered = append(m.filtered, b)
+		for _, source := range m.allSources {
+			if fuzzyMatch(strings.ToLower(source.Label()), query) || fuzzyMatch(strings.ToLower(source.Branch), query) {
+				m.filtered = append(m.filtered, source)
 			}
 		}
 	}
@@ -459,16 +470,17 @@ func (m createModel) viewExistingBranch(b *strings.Builder) {
 	}
 
 	for i := start; i < end; i++ {
-		branch := m.filtered[i]
+		source := m.filtered[i]
+		label := source.Label()
+		if source.Kind == worktree.BranchSourceOrigin && source.LocalExists {
+			label += " (uses local)"
+		}
 		if i == m.branchIdx {
-			b.WriteString(selectedRowStyle.Render(" ▸ " + branch))
+			b.WriteString(selectedRowStyle.Render(" ▸ " + label))
+		} else if source.Kind == worktree.BranchSourceOrigin {
+			b.WriteString("   " + subtitleStyle.Render(label))
 		} else {
-			isRemote := strings.Contains(branch, "/")
-			if isRemote {
-				b.WriteString("   " + subtitleStyle.Render(branch))
-			} else {
-				b.WriteString("   " + branchStyle.Render(branch))
-			}
+			b.WriteString("   " + branchStyle.Render(label))
 		}
 		b.WriteString("\n")
 	}
@@ -479,5 +491,5 @@ func (m createModel) viewExistingBranch(b *strings.Builder) {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render(fmt.Sprintf("  %d/%d branches", len(m.filtered), len(m.allBranches))))
+	b.WriteString(subtitleStyle.Render(fmt.Sprintf("  %d/%d branches", len(m.filtered), len(m.allSources))))
 }

@@ -2,7 +2,7 @@
 # Build the synco binary.
 #
 # Usage:
-#   bin/build            # builds to ./synco
+#   bin/build            # builds to ./synco and ./syncopate
 #   bin/build -o /path   # builds to custom path
 set -euo pipefail
 
@@ -16,4 +16,8 @@ fi
 
 echo "Building synco → ${OUTPUT}"
 (cd "$PROJECT_DIR" && go build -ldflags "-X main.sourceDir=${PROJECT_DIR} -X main.buildChannel=stable" -o "$OUTPUT" .)
+if [[ "$OUTPUT" == "${PROJECT_DIR}/synco" ]]; then
+    echo "Building syncopate → ${PROJECT_DIR}/syncopate"
+    (cd "$PROJECT_DIR" && go build -ldflags "-X main.sourceDir=${PROJECT_DIR} -X main.buildChannel=stable" -o "${PROJECT_DIR}/syncopate" .)
+fi
 echo "Done."

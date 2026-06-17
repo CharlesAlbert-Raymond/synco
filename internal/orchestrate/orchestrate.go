@@ -20,28 +20,55 @@ func CreateWorktree(repoRoot string, cfg config.Config, branch, base string) (wt
 
 	project := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
 	sessName = tmux.SessionNameFor(project, branch)
-	if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
-		return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
-	}
+	sessionExists := tmux.SessionExists(sessName)
+	if !sessionExists {
+		if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
+			return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
+		}
 
-	if err := config.RunHookInTmux(sessName, cfg.OnCreate, branch, wtPath); err != nil {
-		return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
+		if err := config.RunHookInTmux(sessName, cfg.OnCreate, branch, wtPath); err != nil {
+			return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
+		}
 	}
 
 	return wtPath, sessName, nil
 }
 
-// CreateWorktreeFromExisting creates a worktree from an existing branch (local or remote).
-// For remote branches like "origin/feature-x", it creates a local tracking branch "feature-x".
-func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, branch string) (wtPath, sessName string, err error) {
-	localBranch := ExistingBranchLocalName(repoRoot, branch)
+// BranchSourceFromName converts a user-provided existing branch name into a branch source.
+func BranchSourceFromName(repoRoot, branch string) worktree.BranchSource {
+	if strings.HasPrefix(branch, "origin/") {
+		localBranch := strings.TrimPrefix(branch, "origin/")
+		return worktree.BranchSource{
+			Kind:        worktree.BranchSourceOrigin,
+			Branch:      localBranch,
+			RemoteRef:   branch,
+			LocalExists: worktree.BranchExists(repoRoot, localBranch),
+		}
+	}
+	return worktree.BranchSource{Kind: worktree.BranchSourceLocal, Branch: branch, LocalExists: true}
+}
+
+// CreateWorktreeFromExisting creates a worktree from an existing local or origin branch source.
+// Origin sources create a local tracking branch when one does not already exist.
+func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, source worktree.BranchSource) (wtPath, sessName string, err error) {
+	localBranch := source.Branch
 
 	wtPath = cfg.WorktreePath(repoRoot, localBranch)
 
-	if worktree.RemoteBranchExists(repoRoot, branch) {
-		err = worktree.AddTracking(repoRoot, wtPath, localBranch, branch)
-	} else {
-		err = worktree.Add(repoRoot, wtPath, branch, false, "")
+	switch source.Kind {
+	case worktree.BranchSourceOrigin:
+		if source.RemoteRef == "" {
+			source.RemoteRef = "origin/" + localBranch
+		}
+		if worktree.BranchExists(repoRoot, localBranch) {
+			err = worktree.Add(repoRoot, wtPath, localBranch, false, "")
+		} else {
+			err = worktree.AddTracking(repoRoot, wtPath, localBranch, source.RemoteRef)
+		}
+	case worktree.BranchSourceLocal:
+		err = worktree.Add(repoRoot, wtPath, localBranch, false, "")
+	default:
+		return "", "", fmt.Errorf("unknown branch source %q", source.Kind)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w", err)
@@ -49,30 +76,18 @@ func CreateWorktreeFromExisting(repoRoot string, cfg config.Config, branch strin
 
 	project := tmux.ResolveProjectName(repoRoot, cfg.ProjectName)
 	sessName = tmux.SessionNameFor(project, localBranch)
-	if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
-		return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
-	}
+	sessionExists := tmux.SessionExists(sessName)
+	if !sessionExists {
+		if err := tmux.NewSessionWithLayout(sessName, wtPath, cfg); err != nil {
+			return wtPath, "", fmt.Errorf("worktree created at %s but tmux session failed: %w", wtPath, err)
+		}
 
-	if err := config.RunHookInTmux(sessName, cfg.OnCreate, localBranch, wtPath); err != nil {
-		return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
+		if err := config.RunHookInTmux(sessName, cfg.OnCreate, localBranch, wtPath); err != nil {
+			return wtPath, sessName, fmt.Errorf("worktree and session created but on_create hook failed: %w", err)
+		}
 	}
 
 	return wtPath, sessName, nil
-}
-
-// ExistingBranchLocalName returns the local branch name used for an existing branch selection.
-func ExistingBranchLocalName(repoRoot, branch string) string {
-	if worktree.RemoteBranchExists(repoRoot, branch) {
-		return strings.TrimPrefix(branch, remoteName(branch)+"/")
-	}
-	return branch
-}
-
-func remoteName(branch string) string {
-	if idx := strings.Index(branch, "/"); idx != -1 {
-		return branch[:idx]
-	}
-	return branch
 }
 
 // DeleteWorktreeOpts controls delete behavior.

@@ -3,6 +3,7 @@
 
 worktree_dir: ".worktrees"
 sidebar_width: "28"
+project_name: "synco"
 on_create: ""
 on_destroy: ""
 auto_delete_branch: true

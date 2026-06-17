@@ -49,7 +49,7 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 					project := tmux.ResolveProjectName(m.repoRoot, m.config.ProjectName)
 					mainSession := tmux.SessionNameFor(project, tmux.RootSessionKey)
 					_ = tmux.NewSession(mainSession, m.repoRoot) // may already exist
-					_ = tmux.EnsureSidebar(mainSession, m.repoRoot)
+					_ = tmux.EnsureSidebar(mainSession, m.repoRoot, m.config.SidebarWidth)
 					_ = tmux.SwitchClient(mainSession)
 				}
 			}

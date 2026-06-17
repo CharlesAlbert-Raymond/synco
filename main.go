@@ -187,6 +187,9 @@ func launch(repoRoot string, cfg config.Config) {
 
 	case tmux.InsideHasSidebar:
 		// Sidebar already running in this session
+		if sess, err := tmux.CurrentSessionName(); err == nil {
+			_ = tmux.EnsureSidebarResizeHook(sess, sidebarWidth)
+		}
 		fmt.Println("synco is already running in this session.")
 		fmt.Println()
 		fmt.Println("  Tip: focus the sidebar pane with Ctrl-b + ←")

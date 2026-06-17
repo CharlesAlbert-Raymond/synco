@@ -19,6 +19,27 @@ type Worktree struct {
 	IsMain bool
 }
 
+// BranchSourceKind identifies where an existing branch choice comes from.
+type BranchSourceKind string
+
+const (
+	BranchSourceLocal  BranchSourceKind = "local"
+	BranchSourceOrigin BranchSourceKind = "origin"
+)
+
+// BranchSource is a selectable source for creating a worktree from an existing branch.
+type BranchSource struct {
+	Kind        BranchSourceKind
+	Branch      string // local branch name, e.g. "feature-x"
+	RemoteRef   string // remote-tracking branch, e.g. "origin/feature-x"
+	LocalExists bool
+}
+
+// Label returns the display label for the branch source.
+func (s BranchSource) Label() string {
+	return string(s.Kind) + ": " + s.Branch
+}
+
 // List returns all worktrees for the repo at repoRoot.
 func List(repoRoot string) ([]Worktree, error) {
 	cmd := exec.Command("git", "worktree", "list", "--porcelain")
@@ -158,9 +179,46 @@ func RemoteBranchList(repoRoot string) ([]string, error) {
 	return branches, nil
 }
 
+// OriginBranchList returns origin remote-tracking refs as local branch names.
+func OriginBranchList(repoRoot string) ([]string, error) {
+	remote, err := RemoteBranchList(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	branches := make([]string, 0, len(remote))
+	for _, ref := range remote {
+		if strings.HasPrefix(ref, "origin/") {
+			branches = append(branches, strings.TrimPrefix(ref, "origin/"))
+		}
+	}
+	return branches, nil
+}
+
+// CheckedOutBranches returns local branches already attached to any worktree.
+func CheckedOutBranches(repoRoot string) (map[string]bool, error) {
+	wts, err := List(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	branches := make(map[string]bool, len(wts))
+	for _, wt := range wts {
+		if wt.Branch != "" && wt.Branch != "(detached)" {
+			branches[wt.Branch] = true
+		}
+	}
+	return branches, nil
+}
+
 // RemoteBranchExists reports whether branch names an existing remote ref like origin/feature-x.
 func RemoteBranchExists(repoRoot, branch string) bool {
 	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/remotes/"+branch)
+	cmd.Dir = repoRoot
+	return cmd.Run() == nil
+}
+
+// BranchExists reports whether branch names an existing local branch.
+func BranchExists(repoRoot, branch string) bool {
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
 	cmd.Dir = repoRoot
 	return cmd.Run() == nil
 }

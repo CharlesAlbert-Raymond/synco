@@ -204,8 +204,9 @@ func (tc *toolContext) handleCreateWorktree(_ context.Context, req mcp.CallToolR
 	resultBranch := branch
 	existing, _ := boolArg(req, "existing_branch")
 	if existing {
-		resultBranch = orchestrate.ExistingBranchLocalName(tc.repoRoot, branch)
-		wtPath, sessName, err = orchestrate.CreateWorktreeFromExisting(tc.repoRoot, cfg, branch)
+		source := orchestrate.BranchSourceFromName(tc.repoRoot, branch)
+		resultBranch = source.Branch
+		wtPath, sessName, err = orchestrate.CreateWorktreeFromExisting(tc.repoRoot, cfg, source)
 	} else {
 		base := stringArg(req, "base")
 		wtPath, sessName, err = orchestrate.CreateWorktree(tc.repoRoot, cfg, branch, base)

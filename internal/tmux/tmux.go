@@ -133,6 +133,9 @@ func ListSessions(project string) ([]Session, error) {
 func NewSession(name, workdir string) error {
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", name, "-c", workdir)
 	if out, err := cmd.CombinedOutput(); err != nil {
+		if SessionExists(name) {
+			return nil
+		}
 		return fmt.Errorf("tmux new-session: %s: %w", string(out), err)
 	}
 	return nil

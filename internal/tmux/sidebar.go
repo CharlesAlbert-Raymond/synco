@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -131,12 +132,18 @@ func AddSidebarToCurrent(repoRoot string, sidebarWidth string) error {
 		activePaneBefore = activePane(session)
 	}
 
-	cmd := exec.Command("tmux", "split-window", "-fhb",
+	cmd := exec.Command("tmux", "split-window", "-P", "-F", "#{pane_id}", "-fhb",
 		"-l", sidebarWidth,
 		binary, "--sidebar", "--root", repoRoot,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("tmux split-window: %s: %w", string(out), err)
+	}
+	if session != "" {
+		if err := installSidebarResizeHook(session, strings.TrimSpace(string(out)), sidebarWidth); err != nil {
+			return err
+		}
 	}
 
 	// Restore focus to the work pane.
@@ -149,11 +156,21 @@ func AddSidebarToCurrent(repoRoot string, sidebarWidth string) error {
 
 // EnsureSidebar makes sure the given session has a synco sidebar pane.
 // If it already has one, this is a no-op.
-func EnsureSidebar(session, repoRoot string) error {
+func EnsureSidebar(session, repoRoot string, width string) error {
+	if width == "" {
+		width = defaultSidebarWidth
+	}
 	if hasSidebarPaneInSession(session) {
+		_ = EnsureSidebarResizeHook(session, width)
 		return nil
 	}
-	return addSidebar(session, repoRoot, defaultSidebarWidth)
+	return addSidebar(session, repoRoot, width)
+}
+
+// EnsureSidebarResizeHook keeps an existing sidebar pane at a fixed numeric
+// width when tmux resizes the outer window.
+func EnsureSidebarResizeHook(session, width string) error {
+	return installSidebarResizeHook(session, findSidebarPane(session), width)
 }
 
 // addSidebar splits a sidebar into the left side of the given session.
@@ -166,13 +183,17 @@ func addSidebar(session, repoRoot string, width string) error {
 	// Remember the active work pane before splitting so we can restore focus.
 	activePaneBefore := activePane(session)
 
-	cmd := exec.Command("tmux", "split-window", "-fhb",
+	cmd := exec.Command("tmux", "split-window", "-P", "-F", "#{pane_id}", "-fhb",
 		"-l", width,
 		"-t", session,
 		binary, "--sidebar", "--root", repoRoot,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("tmux split-window: %s: %w", string(out), err)
+	}
+	if err := installSidebarResizeHook(session, strings.TrimSpace(string(out)), width); err != nil {
+		return err
 	}
 
 	// Restore focus to the work pane that was active before the sidebar split.
@@ -181,6 +202,68 @@ func addSidebar(session, repoRoot string, width string) error {
 	}
 
 	return nil
+}
+
+func fixedSidebarWidth(width string) (int, bool) {
+	width = strings.TrimSpace(width)
+	if width == "" || strings.HasSuffix(width, "%") {
+		return 0, false
+	}
+
+	target, err := strconv.Atoi(width)
+	if err != nil || target <= 0 {
+		return 0, false
+	}
+	return target, true
+}
+
+func installSidebarResizeHook(session, paneID, width string) error {
+	target, ok := fixedSidebarWidth(width)
+	if !ok {
+		if paneID != "" {
+			return clearSidebarResizeHook(paneID)
+		}
+		return clearSidebarResizeHook(session)
+	}
+	if paneID == "" {
+		return nil
+	}
+
+	cmd := exec.Command("tmux", "set-hook", "-w", "-t", paneID, "window-resized[90]",
+		fmt.Sprintf("resize-pane -t %s -x %d", paneID, target),
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux set-hook window-resized: %s: %w", string(out), err)
+	}
+
+	cmd = exec.Command("tmux", "resize-pane", "-t", paneID, "-x", strconv.Itoa(target))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux resize-pane: %s: %w", string(out), err)
+	}
+	return nil
+}
+
+func clearSidebarResizeHook(session string) error {
+	cmd := exec.Command("tmux", "set-hook", "-uw", "-t", session, "window-resized[90]")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux clear-hook window-resized: %s: %w", string(out), err)
+	}
+	return nil
+}
+
+func findSidebarPane(session string) string {
+	cmd := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_start_command}")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 && strings.Contains(parts[1], "--sidebar") {
+			return parts[0]
+		}
+	}
+	return ""
 }
 
 // hasSidebarPane checks if the current session has a pane running synco --sidebar.

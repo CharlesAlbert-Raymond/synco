@@ -122,6 +122,26 @@ func TestAddTrackingCreatesLocalTrackingBranch(t *testing.T) {
 	}
 }
 
+func TestBranchExists(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	runGit(t, "", "init", repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "initial")
+	runGit(t, repo, "checkout", "-b", "feature/local")
+
+	if !BranchExists(repo, "feature/local") {
+		t.Fatal("expected feature/local to exist")
+	}
+	if BranchExists(repo, "feature/missing") {
+		t.Fatal("expected feature/missing not to exist")
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	_ = runGitOutput(t, dir, args...)
