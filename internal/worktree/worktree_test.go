@@ -142,6 +142,34 @@ func TestBranchExists(t *testing.T) {
 	}
 }
 
+func TestRemoveFastToleratesAlreadyRemovedWorktree(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	runGit(t, "", "init", repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "initial")
+
+	wtPath := filepath.Join(repo, ".worktrees", "cleanup-removes-first")
+	if err := Add(repo, wtPath, "cleanup-removes-first", true, ""); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := os.RemoveAll(wtPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveFast(repo, wtPath); err != nil {
+		t.Fatalf("RemoveFast failed: %v", err)
+	}
+
+	if strings.Contains(runGitOutput(t, repo, "worktree", "list", "--porcelain"), wtPath) {
+		t.Fatalf("expected stale worktree metadata for %q to be pruned", wtPath)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	_ = runGitOutput(t, dir, args...)

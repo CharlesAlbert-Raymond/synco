@@ -109,17 +109,18 @@ func RemoveFast(repoRoot, path string) error {
 	trashPath := path + fmt.Sprintf(".synco-trash-%d", time.Now().UnixNano())
 
 	if err := os.Rename(path, trashPath); err != nil {
+		if os.IsNotExist(err) {
+			return prune(repoRoot)
+		}
 		// Fall back to the blocking path if rename fails (e.g. cross-device)
 		return Remove(repoRoot, path)
 	}
 
 	// Tell git the worktree is gone
-	cmd := exec.Command("git", "worktree", "prune")
-	cmd.Dir = repoRoot
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if err := prune(repoRoot); err != nil {
 		// Try to undo the rename so state isn't broken
 		_ = os.Rename(trashPath, path)
-		return fmt.Errorf("git worktree prune: %s: %w", string(out), err)
+		return err
 	}
 
 	// Delete trashed files in the background
@@ -127,6 +128,15 @@ func RemoveFast(repoRoot, path string) error {
 		_ = os.RemoveAll(trashPath)
 	}()
 
+	return nil
+}
+
+func prune(repoRoot string) error {
+	cmd := exec.Command("git", "worktree", "prune")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree prune: %s: %w", string(out), err)
+	}
 	return nil
 }
 
