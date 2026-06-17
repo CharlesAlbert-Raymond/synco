@@ -57,6 +57,7 @@ func main() {
 	popupEditTitleFlag := flag.Bool("popup-edit-title", false, "run edit title form as popup (internal)")
 	branchFlag := flag.String("branch", "", "branch name for popup operations (internal)")
 	titleFlag := flag.String("title", "", "current title for popup-edit-title (internal)")
+	intentFileFlag := flag.String("intent-file", "", "path for popup intent output (internal)")
 	flag.Parse()
 
 	// Handle --project mode (multi-repo) before resolving single repo root
@@ -70,7 +71,7 @@ func main() {
 
 	switch {
 	case *popupCreateFlag:
-		m := tui.NewPopupCreateModel(repoRoot, cfg)
+		m := tui.NewPopupCreateModel(repoRoot, cfg, *intentFileFlag)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -94,7 +95,7 @@ func main() {
 			os.Exit(1)
 		}
 		found := &entry
-		m := tui.NewPopupConfirmModel(*found, repoRoot, cfg)
+		m := tui.NewPopupConfirmModel(*found, repoRoot, cfg, *intentFileFlag)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -107,7 +108,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Error: --branch is required for --popup-edit-title")
 			os.Exit(1)
 		}
-		m := tui.NewPopupEditTitleModel(branch, *titleFlag, repoRoot, cfg)
+		m := tui.NewPopupEditTitleModel(branch, *titleFlag, repoRoot, cfg, *intentFileFlag)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)

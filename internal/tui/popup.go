@@ -4,23 +4,24 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
-	"github.com/charles-albert-raymond/synco/internal/metadata"
 	"github.com/charles-albert-raymond/synco/internal/state"
 )
 
 // PopupCreateModel wraps createModel for standalone popup usage.
 type PopupCreateModel struct {
-	create   createModel
-	repoRoot string
-	config   config.Config
+	create     createModel
+	repoRoot   string
+	config     config.Config
+	intentFile string
 }
 
 // NewPopupCreateModel creates a model for the create worktree popup.
-func NewPopupCreateModel(repoRoot string, cfg config.Config) PopupCreateModel {
+func NewPopupCreateModel(repoRoot string, cfg config.Config, intentFile string) PopupCreateModel {
 	return PopupCreateModel{
-		create:   newCreateModel(repoRoot, cfg),
-		repoRoot: repoRoot,
-		config:   cfg,
+		create:     newCreateModel(repoRoot, cfg),
+		repoRoot:   repoRoot,
+		config:     cfg,
+		intentFile: intentFile,
 	}
 }
 
@@ -35,13 +36,8 @@ func (m PopupCreateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
 		}
-	case createDoneMsg:
-		if msg.title != "" {
-			if store, err := metadata.Load(m.repoRoot, m.config.WorktreeDir); err == nil {
-				store.SetTitle(msg.branch, msg.title)
-				_ = store.Save(m.repoRoot, m.config.WorktreeDir)
-			}
-		}
+	case createIntentMsg:
+		_ = writePopupIntent(m.intentFile, popupIntentEnvelope{Kind: "create", Create: &msg})
 		return m, tea.Quit
 	}
 
@@ -56,13 +52,15 @@ func (m PopupCreateModel) View() string {
 
 // PopupConfirmModel wraps confirmModel for standalone popup usage.
 type PopupConfirmModel struct {
-	confirm confirmModel
+	confirm    confirmModel
+	intentFile string
 }
 
 // NewPopupConfirmModel creates a model for the delete confirmation popup.
-func NewPopupConfirmModel(entry state.Entry, repoRoot string, cfg config.Config) PopupConfirmModel {
+func NewPopupConfirmModel(entry state.Entry, repoRoot string, cfg config.Config, intentFile string) PopupConfirmModel {
 	return PopupConfirmModel{
-		confirm: newConfirmModel(entry, repoRoot, cfg),
+		confirm:    newConfirmModel(entry, repoRoot, cfg),
+		intentFile: intentFile,
 	}
 }
 
@@ -77,7 +75,8 @@ func (m PopupConfirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc", "n", "N":
 			return m, tea.Quit
 		}
-	case deleteDoneMsg:
+	case deleteIntentMsg:
+		_ = writePopupIntent(m.intentFile, popupIntentEnvelope{Kind: "delete", Delete: &msg})
 		return m, tea.Quit
 	}
 
@@ -92,17 +91,19 @@ func (m PopupConfirmModel) View() string {
 
 // PopupEditTitleModel wraps editTitleModel for standalone popup usage.
 type PopupEditTitleModel struct {
-	edit     editTitleModel
-	repoRoot string
-	config   config.Config
+	edit       editTitleModel
+	repoRoot   string
+	config     config.Config
+	intentFile string
 }
 
 // NewPopupEditTitleModel creates a model for the edit title popup.
-func NewPopupEditTitleModel(branch, currentTitle, repoRoot string, cfg config.Config) PopupEditTitleModel {
+func NewPopupEditTitleModel(branch, currentTitle, repoRoot string, cfg config.Config, intentFile string) PopupEditTitleModel {
 	return PopupEditTitleModel{
-		edit:     newEditTitleModel(branch, currentTitle, repoRoot, cfg),
-		repoRoot: repoRoot,
-		config:   cfg,
+		edit:       newEditTitleModel(branch, currentTitle, repoRoot, cfg),
+		repoRoot:   repoRoot,
+		config:     cfg,
+		intentFile: intentFile,
 	}
 }
 
@@ -117,15 +118,8 @@ func (m PopupEditTitleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
 		}
-	case editTitleDoneMsg:
-		if store, err := metadata.Load(m.repoRoot, m.config.WorktreeDir); err == nil {
-			if msg.title == "" {
-				store.Delete(msg.branch)
-			} else {
-				store.SetTitle(msg.branch, msg.title)
-			}
-			_ = store.Save(m.repoRoot, m.config.WorktreeDir)
-		}
+	case editTitleIntentMsg:
+		_ = writePopupIntent(m.intentFile, popupIntentEnvelope{Kind: "edit_title", EditTitle: &msg})
 		return m, tea.Quit
 	}
 

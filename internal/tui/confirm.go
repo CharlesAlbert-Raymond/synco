@@ -8,10 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
-	"github.com/charles-albert-raymond/synco/internal/orchestrate"
-	"github.com/charles-albert-raymond/synco/internal/session"
 	"github.com/charles-albert-raymond/synco/internal/state"
-	"github.com/charles-albert-raymond/synco/internal/tmux"
 )
 
 type confirmModel struct {
@@ -21,8 +18,6 @@ type confirmModel struct {
 	deleteBranch bool
 	err          string
 }
-
-type deleteDoneMsg struct{}
 
 func newConfirmModel(entry state.Entry, repoRoot string, cfg config.Config) confirmModel {
 	return confirmModel{
@@ -42,30 +37,8 @@ func (m confirmModel) Update(msg tea.Msg) (confirmModel, tea.Cmd) {
 			return m, nil
 
 		case "y", "Y":
-			// If we're deleting the session we're inside, switch away first
-			deletingSelf := false
-			if m.entry.HasSession {
-				if current, err := tmux.CurrentSessionName(); err == nil && current == m.entry.SessionName {
-					deletingSelf = true
-					project := session.ResolveProjectName(m.repoRoot, m.config.ProjectName)
-					mainSession := session.SessionNameFor(project, session.RootKey)
-					_ = tmux.NewSession(mainSession, m.repoRoot) // may already exist
-					_ = tmux.EnsureSidebar(mainSession, m.repoRoot, m.config.SidebarWidth)
-					_ = tmux.SwitchClient(mainSession)
-				}
-			}
-
-			opts := orchestrate.DeleteWorktreeOpts{DeleteBranch: m.deleteBranch}
-			if err := orchestrate.DeleteWorktree(m.repoRoot, m.config, m.entry, opts); err != nil {
-				m.err = fmt.Sprintf("%v", err)
-				return m, nil
-			}
-
-			if deletingSelf {
-				return m, tea.Quit
-			}
-
-			return m, func() tea.Msg { return deleteDoneMsg{} }
+			intent := deleteIntentMsg{Entry: m.entry, DeleteBranch: m.deleteBranch}
+			return m, func() tea.Msg { return intent }
 
 		case "n", "N", "esc":
 			return m, nil

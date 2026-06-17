@@ -26,27 +26,28 @@ type tmuxExecCmd struct {
 	cmd *exec.Cmd
 }
 
-func (t *tmuxExecCmd) Run() error         { return t.cmd.Run() }
+func (t *tmuxExecCmd) Run() error            { return t.cmd.Run() }
 func (t *tmuxExecCmd) SetStdin(r io.Reader)  { t.cmd.Stdin = r }
 func (t *tmuxExecCmd) SetStdout(w io.Writer) { t.cmd.Stdout = w }
 func (t *tmuxExecCmd) SetStderr(w io.Writer) { t.cmd.Stderr = w }
 
 type listModel struct {
-	entries            []state.Entry
-	otherPorts         []state.SessionPorts // non-synco sessions with ports
-	cursor             int
-	resetCursorOnNext  bool // reset cursor to current worktree on next entriesMsg
-	width              int
-	height             int
-	message            string
-	msgStyle           lipgloss.Style
-	config             config.Config
-	projectName        string          // config-defined project name override
-	notified           map[string]bool // sessions that already fired a notification
-	silentSessions     map[string]bool // sessions currently in silence (for red dot)
-	filtering          bool            // true when fuzzy filter input is active
-	filterInput        textinput.Model
-	filteredIndices    []int           // indices into entries that match; nil = show all
+	entries           []state.Entry
+	otherPorts        []state.SessionPorts // non-synco sessions with ports
+	cursor            int
+	resetCursorOnNext bool // reset cursor to current worktree on next entriesMsg
+	width             int
+	height            int
+	message           string
+	msgStyle          lipgloss.Style
+	config            config.Config
+	projectName       string          // config-defined project name override
+	notified          map[string]bool // sessions that already fired a notification
+	silentSessions    map[string]bool // sessions currently in silence (for red dot)
+	filtering         bool            // true when fuzzy filter input is active
+	filterInput       textinput.Model
+	filteredIndices   []int // indices into entries that match; nil = show all
+	jobs              map[string]jobKind
 }
 
 func newListModel() listModel {
@@ -119,6 +120,10 @@ func (m listModel) Update(msg tea.Msg, repoRoot string) (listModel, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
+			if m.isEntryJobActive(entry) {
+				m.setJobBlockedMessage(entry)
+				return m, nil
+			}
 			m.clearNotification(entry.SessionName)
 
 			if err := m.ensureSession(entry); err != nil {
@@ -161,6 +166,10 @@ func (m listModel) updateFilter(msg tea.KeyMsg, repoRoot string, sidebarMode boo
 	case "enter":
 		entry, ok := m.selectedEntry()
 		if !ok {
+			return m, nil
+		}
+		if m.isEntryJobActive(entry) {
+			m.setJobBlockedMessage(entry)
 			return m, nil
 		}
 		m.exitFilter()
@@ -266,6 +275,10 @@ func (m listModel) UpdateSidebar(msg tea.Msg, repoRoot string) (listModel, tea.C
 		case msg.String() == "enter":
 			entry, ok := m.selectedEntry()
 			if !ok {
+				return m, nil
+			}
+			if m.isEntryJobActive(entry) {
+				m.setJobBlockedMessage(entry)
 				return m, nil
 			}
 			m.clearNotification(entry.SessionName)
@@ -529,6 +542,11 @@ func (m listModel) ViewCompact(width int) string {
 			lines = append(lines, branchLine)
 		}
 
+		// Active job status
+		if status := m.jobStatus(entry); status != "" {
+			lines = append(lines, lipgloss.NewStyle().Foreground(colorWarning).Render(status+"..."))
+		}
+
 		// Show listening ports
 		if len(entry.Ports) > 0 {
 			portsStr := formatPorts(entry.Ports)
@@ -645,7 +663,9 @@ func (m listModel) View() string {
 
 		// Session status
 		var sessStr string
-		if m.silentSessions[entry.SessionName] {
+		if status := m.jobStatus(entry); status != "" {
+			sessStr = lipgloss.NewStyle().Foreground(colorWarning).Render(fmt.Sprintf("%-14s", status+"..."))
+		} else if m.silentSessions[entry.SessionName] {
 			sessStr = notificationDotStyle.Render("● idle        ")
 		} else if entry.HasSession {
 			if entry.TmuxSession.Attached {
@@ -709,6 +729,25 @@ func formatPorts(ports []int) string {
 		parts[i] = ":" + strconv.Itoa(p)
 	}
 	return strings.Join(parts, " ")
+}
+
+func (m listModel) jobStatus(entry state.Entry) string {
+	if m.jobs == nil {
+		return ""
+	}
+	if kind, ok := m.jobs[entry.BranchShort]; ok {
+		return string(kind)
+	}
+	return ""
+}
+
+func (m listModel) isEntryJobActive(entry state.Entry) bool {
+	return m.jobStatus(entry) != ""
+}
+
+func (m *listModel) setJobBlockedMessage(entry state.Entry) {
+	m.message = fmt.Sprintf("%s already %s...", entry.BranchShort, m.jobStatus(entry))
+	m.msgStyle = errorStyle
 }
 
 func truncate(s string, maxLen int) string {

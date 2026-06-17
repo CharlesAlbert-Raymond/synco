@@ -10,11 +10,6 @@ import (
 	"github.com/charles-albert-raymond/synco/internal/config"
 )
 
-type editTitleDoneMsg struct {
-	branch string
-	title  string
-}
-
 type editTitleModel struct {
 	branch   string
 	input    textinput.Model
@@ -50,7 +45,7 @@ func (m editTitleModel) Update(msg tea.Msg) (editTitleModel, tea.Cmd) {
 			title := strings.TrimSpace(m.input.Value())
 			branch := m.branch
 			return m, func() tea.Msg {
-				return editTitleDoneMsg{branch: branch, title: title}
+				return editTitleIntentMsg{Branch: branch, Title: title}
 			}
 		}
 	}

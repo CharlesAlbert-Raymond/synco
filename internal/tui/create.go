@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
-	"github.com/charles-albert-raymond/synco/internal/orchestrate"
 	"github.com/charles-albert-raymond/synco/internal/worktree"
 )
 
@@ -46,11 +45,6 @@ type createModel struct {
 	err      string
 	repoRoot string
 	config   config.Config
-}
-
-type createDoneMsg struct {
-	branch string
-	title  string
 }
 
 // branchesMsg is sent when branch listing completes.
@@ -287,11 +281,8 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 		}
 		title := strings.TrimSpace(m.titleInput.Value())
 		base := strings.TrimSpace(m.baseInput.Value())
-		if _, _, err := orchestrate.CreateWorktree(m.repoRoot, m.config, branch, base, orchestrate.CreateWorktreeOpts{CreationProfile: m.selectedProfileName()}); err != nil {
-			m.err = fmt.Sprintf("Failed: %v", err)
-			return m, nil
-		}
-		return m, func() tea.Msg { return createDoneMsg{branch: branch, title: title} }
+		intent := createIntentMsg{Branch: branch, Title: title, Base: base, CreationProfile: m.selectedProfileName()}
+		return m, func() tea.Msg { return intent }
 	}
 
 	// Existing branch mode
@@ -301,11 +292,8 @@ func (m createModel) handleSubmit() (createModel, tea.Cmd) {
 	}
 	source := m.filtered[m.branchIdx]
 	title := strings.TrimSpace(m.existTitleInput.Value())
-	if _, _, err := orchestrate.CreateWorktreeFromExisting(m.repoRoot, m.config, source, orchestrate.CreateWorktreeOpts{CreationProfile: m.selectedProfileName()}); err != nil {
-		m.err = fmt.Sprintf("Failed: %v", err)
-		return m, nil
-	}
-	return m, func() tea.Msg { return createDoneMsg{branch: source.Branch, title: title} }
+	intent := createIntentMsg{Branch: source.Branch, Title: title, Source: source, UseSource: true, CreationProfile: m.selectedProfileName()}
+	return m, func() tea.Msg { return intent }
 }
 
 func (m *createModel) cycleProfile() {

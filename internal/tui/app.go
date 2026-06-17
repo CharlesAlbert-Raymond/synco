@@ -12,6 +12,9 @@ import (
 
 	"github.com/charles-albert-raymond/synco/internal/config"
 	"github.com/charles-albert-raymond/synco/internal/metadata"
+	"github.com/charles-albert-raymond/synco/internal/orchestrate"
+	"github.com/charles-albert-raymond/synco/internal/session"
+	"github.com/charles-albert-raymond/synco/internal/state"
 	"github.com/charles-albert-raymond/synco/internal/tmux"
 )
 
@@ -29,8 +32,26 @@ const (
 
 type errMsg struct{ error }
 type tickMsg time.Time
-type popupDoneMsg struct{}
+type popupDoneMsg struct {
+	intent popupIntentEnvelope
+	ok     bool
+	err    error
+}
 type rebuildDoneMsg struct{ err error }
+
+type jobKind string
+
+const (
+	jobCreating jobKind = "creating"
+	jobDeleting jobKind = "deleting"
+)
+
+type jobDoneMsg struct {
+	branch string
+	kind   jobKind
+	title  string
+	err    error
+}
 
 type Model struct {
 	currentView      view
@@ -46,7 +67,8 @@ type Model struct {
 	err              error
 	sidebarMode      bool
 	sourceDir        string // synco source dir for rebuilding (set via ldflags)
-	RestartRequested bool   // signals main() to re-exec after quit
+	jobs             map[string]jobKind
+	RestartRequested bool // signals main() to re-exec after quit
 }
 
 // projectNameFromConfig returns the config's project_name, or empty for auto-derive.
@@ -55,22 +77,27 @@ func (m Model) projectNameFromConfig() string {
 }
 
 func NewModel(repoRoot string, cfg config.Config, sourceDir string) Model {
+	jobs := make(map[string]jobKind)
 	lm := newListModel()
 	lm.config = cfg
 	lm.projectName = cfg.ProjectName
+	lm.jobs = jobs
 	return Model{
 		currentView: viewList,
 		list:        lm,
 		repoRoot:    repoRoot,
 		config:      cfg,
 		sourceDir:   sourceDir,
+		jobs:        jobs,
 	}
 }
 
 func NewSidebarModel(repoRoot string, cfg config.Config, sourceDir string) Model {
+	jobs := make(map[string]jobKind)
 	lm := newListModel()
 	lm.config = cfg
 	lm.projectName = cfg.ProjectName
+	lm.jobs = jobs
 	return Model{
 		currentView: viewList,
 		list:        lm,
@@ -78,6 +105,7 @@ func NewSidebarModel(repoRoot string, cfg config.Config, sourceDir string) Model
 		config:      cfg,
 		sidebarMode: true,
 		sourceDir:   sourceDir,
+		jobs:        jobs,
 	}
 }
 
@@ -115,6 +143,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case popupDoneMsg:
+		if msg.err != nil {
+			m.list.message = fmt.Sprintf("Popup failed: %v", msg.err)
+			m.list.msgStyle = errorStyle
+			return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
+		}
+		if !msg.ok {
+			return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
+		}
+		return m.handlePopupIntent(msg.intent)
+
+	case jobDoneMsg:
+		delete(m.jobs, msg.branch)
+		m.list.jobs = m.jobs
+		if msg.err != nil {
+			m.list.message = fmt.Sprintf("%s %s failed: %v", msg.kind, msg.branch, msg.err)
+			m.list.msgStyle = errorStyle
+			return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
+		}
+		if msg.kind == jobCreating && msg.title != "" {
+			m.saveTitle(msg.branch, msg.title)
+		}
+		if msg.kind == jobDeleting {
+			m.deleteTitle(msg.branch)
+		}
+		m.list.message = fmt.Sprintf("%s complete: %s", msg.kind, msg.branch)
+		m.list.msgStyle = successStyle
 		return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
 
 	case tickMsg:
@@ -196,6 +250,10 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			entry, ok := m.list.selectedEntry()
 			if ok {
+				if m.isJobActive(entry.BranchShort) {
+					m.blockedByJob(entry.BranchShort)
+					return m, nil
+				}
 				if m.sidebarMode {
 					return m, launchEditTitlePopup(m.repoRoot, entry.BranchShort, entry.Title)
 				}
@@ -212,6 +270,10 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if entry.Worktree.IsMain {
 					m.list.message = "Cannot delete the main worktree"
 					m.list.msgStyle = errorStyle
+					return m, nil
+				}
+				if m.isJobActive(entry.BranchShort) {
+					m.blockedByJob(entry.BranchShort)
 					return m, nil
 				}
 				if m.sidebarMode {
@@ -252,14 +314,9 @@ func (m Model) updateCreate(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = viewList
 			return m, nil
 		}
-	case createDoneMsg:
+	case createIntentMsg:
 		m.currentView = viewList
-		m.list.message = "Worktree created successfully"
-		m.list.msgStyle = successStyle
-		if msg.title != "" {
-			m.saveTitle(msg.branch, msg.title)
-		}
-		return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
+		return m.startCreateJob(msg)
 	}
 
 	var cmd tea.Cmd
@@ -274,12 +331,9 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = viewList
 			return m, nil
 		}
-	case deleteDoneMsg:
+	case deleteIntentMsg:
 		m.currentView = viewList
-		m.list.message = "Worktree deleted"
-		m.list.msgStyle = successStyle
-		m.deleteTitle(m.confirm.entry.BranchShort)
-		return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
+		return m.startDeleteJob(msg)
 	}
 
 	var cmd tea.Cmd
@@ -304,9 +358,9 @@ func (m Model) updateEditTitle(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = viewList
 			return m, nil
 		}
-	case editTitleDoneMsg:
+	case editTitleIntentMsg:
 		m.currentView = viewList
-		m.saveTitle(msg.branch, msg.title)
+		m.saveTitle(msg.Branch, msg.Title)
 		m.list.message = "Title updated"
 		m.list.msgStyle = successStyle
 		return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
@@ -315,6 +369,112 @@ func (m Model) updateEditTitle(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.editTitle, cmd = m.editTitle.Update(msg)
 	return m, cmd
+}
+
+func (m Model) handlePopupIntent(intent popupIntentEnvelope) (tea.Model, tea.Cmd) {
+	switch intent.Kind {
+	case "create":
+		if intent.Create == nil {
+			return m, nil
+		}
+		return m.startCreateJob(*intent.Create)
+	case "delete":
+		if intent.Delete == nil {
+			return m, nil
+		}
+		return m.startDeleteJob(*intent.Delete)
+	case "edit_title":
+		if intent.EditTitle == nil {
+			return m, nil
+		}
+		m.saveTitle(intent.EditTitle.Branch, intent.EditTitle.Title)
+		m.list.message = "Title updated"
+		m.list.msgStyle = successStyle
+		return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
+	default:
+		return m, fetchEntries(m.repoRoot, m.projectNameFromConfig())
+	}
+}
+
+func (m Model) startCreateJob(intent createIntentMsg) (tea.Model, tea.Cmd) {
+	if m.isJobActive(intent.Branch) {
+		m.blockedByJob(intent.Branch)
+		return m, nil
+	}
+	m.jobs[intent.Branch] = jobCreating
+	m.list.jobs = m.jobs
+	m.list.message = fmt.Sprintf("Creating %s...", intent.Branch)
+	m.list.msgStyle = subtitleStyle
+	return m, tea.Batch(fetchEntries(m.repoRoot, m.projectNameFromConfig()), m.createJobCmd(intent))
+}
+
+func (m Model) createJobCmd(intent createIntentMsg) tea.Cmd {
+	return func() tea.Msg {
+		opts := orchestrate.CreateWorktreeOpts{CreationProfile: intent.CreationProfile}
+		var err error
+		if intent.UseSource {
+			_, _, err = orchestrate.CreateWorktreeFromExisting(m.repoRoot, m.config, intent.Source, opts)
+		} else {
+			_, _, err = orchestrate.CreateWorktree(m.repoRoot, m.config, intent.Branch, intent.Base, opts)
+		}
+		return jobDoneMsg{branch: intent.Branch, kind: jobCreating, title: intent.Title, err: err}
+	}
+}
+
+func (m Model) startDeleteJob(intent deleteIntentMsg) (tea.Model, tea.Cmd) {
+	branch := intent.Entry.BranchShort
+	if m.isJobActive(branch) {
+		m.blockedByJob(branch)
+		return m, nil
+	}
+	if err := m.switchAwayIfDeletingSelf(intent.Entry); err != nil {
+		m.list.message = fmt.Sprintf("Cannot switch away before delete: %v", err)
+		m.list.msgStyle = errorStyle
+		return m, nil
+	}
+	m.jobs[branch] = jobDeleting
+	m.list.jobs = m.jobs
+	m.list.message = fmt.Sprintf("Deleting %s...", branch)
+	m.list.msgStyle = subtitleStyle
+	return m, tea.Batch(fetchEntries(m.repoRoot, m.projectNameFromConfig()), m.deleteJobCmd(intent))
+}
+
+func (m Model) deleteJobCmd(intent deleteIntentMsg) tea.Cmd {
+	return func() tea.Msg {
+		opts := orchestrate.DeleteWorktreeOpts{DeleteBranch: intent.DeleteBranch}
+		err := orchestrate.DeleteWorktree(m.repoRoot, m.config, intent.Entry, opts)
+		return jobDoneMsg{branch: intent.Entry.BranchShort, kind: jobDeleting, err: err}
+	}
+}
+
+func (m Model) switchAwayIfDeletingSelf(entry state.Entry) error {
+	if !entry.HasSession {
+		return nil
+	}
+	current, err := tmux.CurrentSessionName()
+	if err != nil || current != entry.SessionName {
+		return nil
+	}
+	project := session.ResolveProjectName(m.repoRoot, m.config.ProjectName)
+	mainSession := session.SessionNameFor(project, session.RootKey)
+	if err := tmux.NewSession(mainSession, m.repoRoot); err != nil {
+		return err
+	}
+	if err := tmux.EnsureSidebar(mainSession, m.repoRoot, m.config.SidebarWidth); err != nil {
+		return err
+	}
+	return tmux.SwitchClient(mainSession)
+}
+
+func (m Model) isJobActive(branch string) bool {
+	_, ok := m.jobs[branch]
+	return ok
+}
+
+func (m *Model) blockedByJob(branch string) {
+	kind := m.jobs[branch]
+	m.list.message = fmt.Sprintf("%s already %s...", branch, kind)
+	m.list.msgStyle = errorStyle
 }
 
 func (m Model) saveTitle(branch, title string) {
@@ -378,33 +538,71 @@ func (m Model) View() string {
 
 func launchCreatePopup(repoRoot string) tea.Cmd {
 	return func() tea.Msg {
-		_ = tmux.LaunchPopup(
-			[]string{"--popup-create", "--root", repoRoot},
+		intentFile, cleanup, err := popupIntentFile()
+		if err != nil {
+			return popupDoneMsg{err: err}
+		}
+		defer cleanup()
+		if err := tmux.LaunchPopup(
+			[]string{"--popup-create", "--root", repoRoot, "--intent-file", intentFile},
 			70, 28, "Create Worktree",
-		)
-		return popupDoneMsg{}
+		); err != nil {
+			return popupDoneMsg{err: err}
+		}
+		intent, ok, err := readPopupIntent(intentFile)
+		return popupDoneMsg{intent: intent, ok: ok, err: err}
 	}
 }
 
 func launchEditTitlePopup(repoRoot string, branch, currentTitle string) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"--popup-edit-title", "--root", repoRoot, "--branch", branch}
+		intentFile, cleanup, err := popupIntentFile()
+		if err != nil {
+			return popupDoneMsg{err: err}
+		}
+		defer cleanup()
+		args := []string{"--popup-edit-title", "--root", repoRoot, "--branch", branch, "--intent-file", intentFile}
 		if currentTitle != "" {
 			args = append(args, "--title", currentTitle)
 		}
-		_ = tmux.LaunchPopup(args, 60, 14, "Edit Title")
-		return popupDoneMsg{}
+		if err := tmux.LaunchPopup(args, 60, 14, "Edit Title"); err != nil {
+			return popupDoneMsg{err: err}
+		}
+		intent, ok, err := readPopupIntent(intentFile)
+		return popupDoneMsg{intent: intent, ok: ok, err: err}
 	}
 }
 
 func launchDeletePopup(repoRoot string, branch string) tea.Cmd {
 	return func() tea.Msg {
-		_ = tmux.LaunchPopup(
-			[]string{"--popup-delete", "--root", repoRoot, "--branch", branch},
+		intentFile, cleanup, err := popupIntentFile()
+		if err != nil {
+			return popupDoneMsg{err: err}
+		}
+		defer cleanup()
+		if err := tmux.LaunchPopup(
+			[]string{"--popup-delete", "--root", repoRoot, "--branch", branch, "--intent-file", intentFile},
 			60, 20, "Delete Worktree",
-		)
-		return popupDoneMsg{}
+		); err != nil {
+			return popupDoneMsg{err: err}
+		}
+		intent, ok, err := readPopupIntent(intentFile)
+		return popupDoneMsg{intent: intent, ok: ok, err: err}
 	}
+}
+
+func popupIntentFile() (string, func(), error) {
+	f, err := os.CreateTemp("", "synco-popup-intent-*.json")
+	if err != nil {
+		return "", func() {}, err
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", func() {}, err
+	}
+	cleanup := func() { _ = os.Remove(path) }
+	return path, cleanup, nil
 }
 
 // rebuildCmd rebuilds the synco binary from source and signals a restart.
