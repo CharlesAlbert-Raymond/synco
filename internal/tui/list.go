@@ -431,11 +431,11 @@ func (m *listModel) selectedEntry() (state.Entry, bool) {
 }
 
 // ViewCompact renders a narrow sidebar-friendly view with per-worktree cards.
-func (m listModel) ViewCompact(width int) string {
+func (m listModel) ViewCompact(width, height int) string {
 	if width == 0 {
 		width = 28
 	}
-	boxWidth := width - 2 // leave 1 char margin each side
+	boxWidth := max(8, width-2) // leave 1 char margin each side
 
 	var parts []string
 
@@ -449,6 +449,7 @@ func (m listModel) ViewCompact(width int) string {
 	}
 
 	visible := m.visibleEntries()
+	visibleStart, visibleEnd := compactVisibleRange(len(visible), m.cursor, height)
 
 	if len(visible) == 0 {
 		msg := "No worktrees."
@@ -469,10 +470,11 @@ func (m listModel) ViewCompact(width int) string {
 	}
 
 	// Inner width inside card: boxWidth - border(2) - padding(2) = boxWidth - 4
-	innerWidth := boxWidth - 4
+	innerWidth := max(1, boxWidth-4)
 
 	// Render a card for each worktree
-	for i, entry := range visible {
+	for i, entry := range visible[visibleStart:visibleEnd] {
+		entryIndex := visibleStart + i
 		// Resolve display name: title > alias > branch
 		displayName := entry.Title
 		if displayName == "" {
@@ -502,7 +504,7 @@ func (m listModel) ViewCompact(width int) string {
 
 		// Card border color based on state
 		borderColor := colorMuted
-		isSelected := i == m.cursor
+		isSelected := entryIndex == m.cursor
 		if entry.IsCurrent && isSelected {
 			borderColor = colorWarningDim
 		} else if entry.IsCurrent {
@@ -731,6 +733,33 @@ func formatPorts(ports []int) string {
 	return strings.Join(parts, " ")
 }
 
+func compactVisibleRange(total, cursor, height int) (int, int) {
+	if total <= 0 {
+		return 0, 0
+	}
+	if height <= 0 {
+		return 0, total
+	}
+
+	// Keep room for the logo, help footer, separators, and optional sections.
+	// Cards vary in height, so this is intentionally conservative; the final
+	// frame still clips to the exact pane size.
+	maxCards := max(1, (height-8)/4)
+	if maxCards >= total {
+		return 0, total
+	}
+
+	cursor = max(0, min(cursor, total-1))
+	start := cursor - maxCards/2
+	if start < 0 {
+		start = 0
+	}
+	if start+maxCards > total {
+		start = total - maxCards
+	}
+	return start, start + maxCards
+}
+
 func (m listModel) jobStatus(entry state.Entry) string {
 	if m.jobs == nil {
 		return ""
@@ -751,6 +780,9 @@ func (m *listModel) setJobBlockedMessage(entry state.Entry) {
 }
 
 func truncate(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
 	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}

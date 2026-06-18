@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charles-albert-raymond/synco/internal/config"
 	"github.com/charles-albert-raymond/synco/internal/metadata"
@@ -505,13 +504,13 @@ func (m Model) View() string {
 	if m.sidebarMode {
 		switch m.currentView {
 		case viewList:
-			content = m.list.ViewCompact(m.width)
+			content = m.list.ViewCompact(m.width, m.height)
 		case viewCreate:
-			content = m.list.ViewCompact(m.width) + "\n" + m.create.View()
+			content = m.list.ViewCompact(m.width, m.height) + "\n" + m.create.View()
 		case viewConfirmDelete:
-			content = m.list.ViewCompact(m.width) + "\n" + m.confirm.View()
+			content = m.list.ViewCompact(m.width, m.height) + "\n" + m.confirm.View()
 		case viewEditTitle:
-			content = m.list.ViewCompact(m.width) + "\n" + m.editTitle.View()
+			content = m.list.ViewCompact(m.width, m.height) + "\n" + m.editTitle.View()
 		case viewConfig:
 			content = m.configView.View()
 		}
@@ -530,10 +529,7 @@ func (m Model) View() string {
 		}
 	}
 
-	return lipgloss.NewStyle().
-		MaxWidth(m.width).
-		MaxHeight(m.height).
-		Render(content)
+	return renderFrame(content, m.width, m.height)
 }
 
 func launchCreatePopup(repoRoot string) tea.Cmd {
