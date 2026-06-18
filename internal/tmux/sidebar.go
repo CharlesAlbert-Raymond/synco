@@ -230,9 +230,23 @@ func installSidebarResizeHook(session, paneID, width string) error {
 		return nil
 	}
 
-	cmd := exec.Command("tmux", "set-hook", "-w", "-t", paneID, "window-resized[90]",
-		fmt.Sprintf("resize-pane -t %s -x %d", paneID, target),
-	)
+	options := [][2]string{
+		{"@synco_sidebar_pane", paneID},
+		{"@synco_sidebar_width", strconv.Itoa(target)},
+	}
+	for _, option := range options {
+		cmd := exec.Command("tmux", "set-option", "-w", "-t", paneID, option[0], option[1])
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("tmux set-option %s: %s: %w", option[0], string(out), err)
+		}
+	}
+
+	if err := installSidebarPaneKilledHook(); err != nil {
+		return err
+	}
+
+	resizeCmd := fmt.Sprintf("resize-pane -t %s -x %d", paneID, target)
+	cmd := exec.Command("tmux", "set-hook", "-w", "-t", paneID, "window-resized[90]", resizeCmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux set-hook window-resized: %s: %w", string(out), err)
 	}
@@ -244,10 +258,27 @@ func installSidebarResizeHook(session, paneID, width string) error {
 	return nil
 }
 
+func installSidebarPaneKilledHook() error {
+	cmd := exec.Command("tmux", "set-hook", "-g", "after-kill-pane[90]",
+		`run-shell 'tmux list-panes -a -F "##{pane_id},##{@synco_sidebar_pane},##{@synco_sidebar_width}" | awk -F, '\''$1 == $2 && $3 != "" { system("tmux resize-pane -t " $1 " -x " $3) }'\'''`,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux set-hook after-kill-pane: %s: %w", string(out), err)
+	}
+	return nil
+}
+
 func clearSidebarResizeHook(session string) error {
 	cmd := exec.Command("tmux", "set-hook", "-uw", "-t", session, "window-resized[90]")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux clear-hook window-resized: %s: %w", string(out), err)
+	}
+
+	for _, key := range []string{"@synco_sidebar_pane", "@synco_sidebar_width"} {
+		cmd := exec.Command("tmux", "set-option", "-uw", "-t", session, key)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("tmux unset-option %s: %s: %w", key, string(out), err)
+		}
 	}
 	return nil
 }

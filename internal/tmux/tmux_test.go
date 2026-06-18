@@ -81,6 +81,51 @@ func TestInstallSidebarResizeHook(t *testing.T) {
 	}
 }
 
+func TestSidebarResizeHookSurvivesAdjacentPaneRemoval(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+
+	session := fmt.Sprintf("synco-hook-remove-test-%d", os.Getpid())
+	_ = exec.Command("tmux", "kill-session", "-t", session).Run()
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", session, "-x", "170", "-y", "50")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("tmux unavailable: %s: %v", string(out), err)
+	}
+	defer exec.Command("tmux", "kill-session", "-t", session).Run()
+
+	mainPane := activePane(session)
+	cmd = exec.Command("tmux", "split-window", "-P", "-F", "#{pane_id}", "-t", session, "-fhb", "-l", "28", "sleep 60")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("split-window failed: %s: %v", string(out), err)
+	}
+	sidebarPane := strings.TrimSpace(string(out))
+
+	if err := installSidebarResizeHook(session, sidebarPane, "28"); err != nil {
+		t.Fatalf("installSidebarResizeHook failed: %v", err)
+	}
+
+	cmd = exec.Command("tmux", "split-window", "-P", "-F", "#{pane_id}", "-t", mainPane, "-h", "sleep 60")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("split adjacent pane failed: %s: %v", string(out), err)
+	}
+	remainingWorkPane := strings.TrimSpace(string(out))
+	if remainingWorkPane == "" {
+		t.Fatalf("expected split to return remaining work pane id")
+	}
+
+	cmd = exec.Command("tmux", "kill-pane", "-t", mainPane)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("kill adjacent pane failed: %s: %v", string(out), err)
+	}
+
+	if got := paneWidth(t, sidebarPane); got != 28 {
+		t.Fatalf("sidebar width after adjacent pane removal = %d, want 28", got)
+	}
+}
+
 func resizeWindow(t *testing.T, session string, width int) {
 	t.Helper()
 	cmd := exec.Command("tmux", "resize-window", "-t", session, "-x", strconv.Itoa(width), "-y", "50")
